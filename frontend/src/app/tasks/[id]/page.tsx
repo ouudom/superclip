@@ -88,6 +88,7 @@ interface TaskDetails {
   status: string;
   progress?: number;
   progress_message?: string;
+  error_code?: string | null;
   clips_count: number;
   created_at: string;
   updated_at: string;
@@ -115,8 +116,10 @@ export default function TaskPage() {
   const [clips, setClips] = useState<Clip[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
   const [progressMessage, setProgressMessage] = useState("");
+  const [isResuming, setIsResuming] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editedTitle, setEditedTitle] = useState("");
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
@@ -167,6 +170,14 @@ export default function TaskPage() {
     }, 700);
   }, []);
 
+  const getTaskFailureMessage = useCallback((taskData: TaskDetails | null) => {
+    const message = taskData?.progress_message || progressMessage;
+    if (typeof message === "string" && message.trim()) {
+      return message.trim();
+    }
+    return "Processing failed before a detailed error was saved.";
+  }, [progressMessage]);
+
   const fetchTaskStatus = useCallback(
     async (retryCount = 0, maxRetries = 5) => {
       if (!params.id) return false;
@@ -191,6 +202,8 @@ export default function TaskPage() {
 
         const taskData = await taskResponse.json();
         setTask(taskData);
+        setProgress(taskData.progress || 0);
+        setProgressMessage(taskData.progress_message || "");
         setProjectFontFamily(taskData.font_family || "TikTokSans-Regular");
         setProjectFontSize(String(taskData.font_size || 24));
         setProjectFontColor(taskData.font_color || "#FFFFFF");
@@ -201,8 +214,8 @@ export default function TaskPage() {
         setProjectRemoveFillerWords(Boolean(taskData.remove_filler_words));
         setProjectFilteredWords((taskData.filtered_words || []).join(", "));
 
-        // Fetch clips if task is completed or processing (incremental clips)
-        if (taskData.status === "completed" || taskData.status === "processing") {
+        // Fetch clips for active/completed/error states so partial clips stay visible.
+        if (["completed", "processing", "error"].includes(taskData.status)) {
           const clipsResponse = await fetch(`${taskApiUrl}/${params.id}/clips`, {
             cache: "no-store",
           });
@@ -214,7 +227,7 @@ export default function TaskPage() {
           const clipsData = await clipsResponse.json();
           const nextClips = clipsData.clips || [];
           setClips((prev) => {
-            if (taskData.status === "completed") {
+            if (taskData.status === "completed" || taskData.status === "error") {
               return nextClips;
             }
 
@@ -304,9 +317,23 @@ export default function TaskPage() {
       console.log("📊 Status:", data);
       setProgress(data.progress || 0);
       setProgressMessage(data.message || "");
+      if (data.status) {
+        setTask((currentTask) =>
+          currentTask
+            ? {
+                ...currentTask,
+                status: data.status,
+                progress: data.progress ?? currentTask.progress,
+                progress_message: data.message ?? currentTask.progress_message,
+              }
+            : currentTask,
+        );
+      }
 
       if (data.status === "completed") {
         void fetchTaskStatus().then(() => triggerAutoRefresh());
+      } else if (data.status === "error" || data.status === "cancelled") {
+        void fetchTaskStatus();
       }
     });
 
@@ -318,10 +345,21 @@ export default function TaskPage() {
 
       // Update task status if provided
       if (data.status) {
-        setTask((currentTask) => (currentTask ? { ...currentTask, status: data.status } : currentTask));
+        setTask((currentTask) =>
+          currentTask
+            ? {
+                ...currentTask,
+                status: data.status,
+                progress: data.progress ?? currentTask.progress,
+                progress_message: data.message ?? currentTask.progress_message,
+              }
+            : currentTask,
+        );
 
         if (data.status === "completed") {
           void fetchTaskStatus().then(() => triggerAutoRefresh());
+        } else if (data.status === "error" || data.status === "cancelled") {
+          void fetchTaskStatus();
         }
       }
     });
@@ -342,21 +380,27 @@ export default function TaskPage() {
 
     eventSource.addEventListener("close", async (e) => {
       const data = JSON.parse(e.data);
-      console.log("✅ Task completed:", data.status);
+      console.log("Task stream closed:", data.status);
       eventSource.close();
 
-      // Refresh task and clips
       await fetchTaskStatus();
-      triggerAutoRefresh();
+      if (data.status === "completed") {
+        triggerAutoRefresh();
+      }
     });
 
     eventSource.addEventListener("error", (e) => {
       console.error("❌ SSE error:", e);
       const maybeMessageEvent = e as MessageEvent<string>;
       if (typeof maybeMessageEvent.data === "string" && maybeMessageEvent.data.length > 0) {
-        const data = JSON.parse(maybeMessageEvent.data);
-        setError(data.error || "Connection error");
+        try {
+          const data = JSON.parse(maybeMessageEvent.data);
+          setActionError(data.error || "Connection error");
+        } catch {
+          setActionError("Connection error");
+        }
       }
+      void fetchTaskStatus();
       eventSource.close();
     });
 
@@ -635,6 +679,39 @@ export default function TaskPage() {
     void handleExportClip(clip.id, clip.filename);
   };
 
+  const handleResumeTask = async () => {
+    if (!task?.id) return;
+
+    setIsResuming(true);
+    setActionError(null);
+    setError(null);
+    try {
+      const response = await fetch(`${taskApiUrl}/${task.id}/resume`, {
+        method: "POST",
+      });
+      if (!response.ok) {
+        throw new Error(await buildSupportError(response, "Failed to resume task"));
+      }
+      setProgress(0);
+      setProgressMessage("Re-queued by user");
+      setTask((currentTask) =>
+        currentTask
+          ? {
+              ...currentTask,
+              status: "queued",
+              progress: 0,
+              progress_message: "Re-queued by user",
+            }
+          : currentTask,
+      );
+      await fetchTaskStatus();
+    } catch (resumeError) {
+      setActionError(resumeError instanceof Error ? resumeError.message : "Failed to resume task");
+    } finally {
+      setIsResuming(false);
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="min-h-screen bg-white p-4">
@@ -780,6 +857,10 @@ export default function TaskPage() {
                   </div>
                 ) : task.status === "queued" ? (
                   <Badge className="bg-yellow-100 text-yellow-800">Queued</Badge>
+                ) : task.status === "error" ? (
+                  <Badge className="bg-red-100 text-red-800">Error</Badge>
+                ) : task.status === "cancelled" ? (
+                  <Badge className="bg-gray-100 text-gray-700">Cancelled</Badge>
                 ) : (
                   <Badge variant="outline" className="capitalize">
                     {task.status}
@@ -811,14 +892,11 @@ export default function TaskPage() {
                   <Button
                     size="sm"
                     variant="outline"
-                    onClick={async () => {
-                      await fetch(`${taskApiUrl}/${task.id}/resume`, {
-                        method: "POST",
-                      });
-                      await fetchTaskStatus();
-                    }}
+                    onClick={handleResumeTask}
+                    disabled={isResuming}
                   >
-                    Resume
+                    <RefreshCw className={`w-4 h-4 ${isResuming ? "animate-spin" : ""}`} />
+                    {isResuming ? "Resuming" : "Resume"}
                   </Button>
                 )}
               </div>
@@ -829,6 +907,13 @@ export default function TaskPage() {
 
       {/* Main Content */}
       <div className="max-w-6xl mx-auto px-4 py-8">
+        {actionError && (
+          <Alert className="mb-6 border-red-200 bg-red-50 text-red-900">
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>{actionError}</AlertDescription>
+          </Alert>
+        )}
+
         {task?.status === "processing" || task?.status === "queued" ? (
           <div className="space-y-8">
             {/* Progress indicator */}
@@ -927,21 +1012,98 @@ export default function TaskPage() {
             </div>
           </div>
         ) : task?.status === "error" ? (
-          <Card>
-            <CardContent className="p-8 text-center">
-              <div className="text-red-600 mb-4">
-                <AlertCircle className="w-12 h-12 mx-auto mb-2" />
-                <h2 className="text-xl font-semibold">Processing Failed</h2>
+          <div className="space-y-6">
+            <Card>
+              <CardContent className="p-6">
+                <div className="flex flex-col gap-5 md:flex-row md:items-start md:justify-between">
+                  <div className="flex gap-4">
+                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-red-50 text-red-600">
+                      <AlertCircle className="h-6 w-6" />
+                    </div>
+                    <div>
+                      <div className="mb-2 flex flex-wrap items-center gap-2">
+                        <h2 className="text-xl font-semibold text-stone-950">Processing Failed</h2>
+                        {task.error_code && (
+                          <Badge variant="outline" className="border-red-200 bg-red-50 text-red-700">
+                            {task.error_code}
+                          </Badge>
+                        )}
+                      </div>
+                      <p className="max-w-3xl whitespace-pre-wrap break-words text-sm leading-6 text-stone-700">
+                        {getTaskFailureMessage(task)}
+                      </p>
+                      <p className="mt-3 text-xs text-stone-500">
+                        Last update: {new Date(task.updated_at).toLocaleString()}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex shrink-0 flex-wrap gap-2">
+                    <Button
+                      variant="outline"
+                      onClick={handleResumeTask}
+                      disabled={isResuming}
+                    >
+                      <RefreshCw className={`h-4 w-4 ${isResuming ? "animate-spin" : ""}`} />
+                      {isResuming ? "Resuming" : "Retry"}
+                    </Button>
+                    <Link href="/">
+                      <Button variant="outline">
+                        <ArrowLeft className="h-4 w-4" />
+                        New Task
+                      </Button>
+                    </Link>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {clips.length > 0 && (
+              <div className="grid gap-6">
+                <p className="text-sm text-neutral-500">
+                  {clips.length} partial clip{clips.length !== 1 ? "s" : ""} saved before failure
+                </p>
+                {clips.map((clip) => (
+                  <Card key={clip.id} className="overflow-hidden">
+                    <CardContent className="p-0">
+                      <div className="flex flex-col lg:flex-row">
+                        <div className="relative m-3 flex-shrink-0 overflow-hidden rounded-lg bg-black">
+                          <DynamicVideoPlayer src={getClipUrl(clip.video_url)} poster="/placeholder-video.jpg" />
+                        </div>
+                        <div className="flex-1 p-6">
+                          <div className="mb-4 flex items-start justify-between">
+                            <div>
+                              <h3 className="mb-1 text-lg font-semibold text-black">Clip {clip.clip_order}</h3>
+                              <div className="flex items-center gap-2 text-sm text-gray-600">
+                                <span>{clip.start_time} - {clip.end_time}</span>
+                                <span>•</span>
+                                <span>{formatDuration(clip.duration)}</span>
+                              </div>
+                            </div>
+                            <Badge className={getScoreColor(clip.relevance_score)}>
+                              <Star className="mr-1 h-3 w-3" />
+                              {(clip.relevance_score * 100).toFixed(0)}%
+                            </Badge>
+                          </div>
+                          {clip.text && (
+                            <div className="mb-4">
+                              <h4 className="mb-2 font-medium text-black">Transcript</h4>
+                              <p className="rounded bg-gray-50 p-3 text-sm text-gray-700">{clip.text}</p>
+                            </div>
+                          )}
+                          <Button size="sm" variant="outline" asChild>
+                            <a href={getClipUrl(clip.video_url)} download={clip.filename}>
+                              <Download className="h-4 w-4" />
+                              Download
+                            </a>
+                          </Button>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
               </div>
-              <p className="text-gray-600 mb-4">There was an error processing your video. Please try again.</p>
-              <Link href="/">
-                <Button>
-                  <ArrowLeft className="w-4 h-4" />
-                  Back to Home
-                </Button>
-              </Link>
-            </CardContent>
-          </Card>
+            )}
+          </div>
         ) : clips.length === 0 ? (
           <Card>
             <CardContent className="p-8 text-center">
