@@ -276,6 +276,9 @@ class Task(Base):
     generated_clips: Mapped[List["GeneratedClip"]] = relationship(
         "GeneratedClip", back_populates="task", cascade="all, delete-orphan"
     )
+    publish_metadata: Mapped[List["ClipPublishMetadata"]] = relationship(
+        "ClipPublishMetadata", back_populates="task", cascade="all, delete-orphan"
+    )
     artifacts: Mapped[List["TaskArtifact"]] = relationship(
         "TaskArtifact", back_populates="task", cascade="all, delete-orphan"
     )
@@ -308,7 +311,10 @@ class Source(Base):
 
     # Add check constraint for type enum
     __table_args__ = (
-        CheckConstraint("type IN ('youtube', 'video_url')", name="check_source_type"),
+        CheckConstraint(
+            "type IN ('youtube', 'video_url', 'local_watch', 'podcast_rss', 'twitch_vod', 'google_drive')",
+            name="check_source_type",
+        ),
     )
 
     # Relationships - Source can have multiple tasks
@@ -318,6 +324,8 @@ class Source(Base):
         """Decide which type of source this is."""
         if "youtube" in source_url:
             return "youtube"
+        elif source_url.startswith("watch://"):
+            return "local_watch"
         else:
             return "video_url"
 
@@ -376,6 +384,49 @@ class GeneratedClip(Base):
 
     # Relationships
     task: Mapped["Task"] = relationship("Task", back_populates="generated_clips")
+    publish_metadata: Mapped[List["ClipPublishMetadata"]] = relationship(
+        "ClipPublishMetadata", back_populates="clip", cascade="all, delete-orphan"
+    )
+
+
+class ClipPublishMetadata(Base):
+    __tablename__ = "clip_publish_metadata"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=generate_uuid_string
+    )
+    clip_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("generated_clips.id", ondelete="CASCADE"), nullable=False
+    )
+    task_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False
+    )
+    platform: Mapped[str] = mapped_column(String(40), nullable=False)
+    post_status: Mapped[str] = mapped_column(
+        String(40), nullable=False, server_default=sql_text("'draft'")
+    )
+    caption: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    hashtags: Mapped[List[str]] = mapped_column(
+        ARRAY(Text), nullable=False, server_default=sql_text("'{}'")
+    )
+    checklist_json: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, server_default=sql_text("'{}'::jsonb")
+    )
+    published_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    published_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    export_path: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    clip: Mapped["GeneratedClip"] = relationship(
+        "GeneratedClip", back_populates="publish_metadata"
+    )
+    task: Mapped["Task"] = relationship("Task", back_populates="publish_metadata")
 
 
 class TaskLibraryMetadata(Base):

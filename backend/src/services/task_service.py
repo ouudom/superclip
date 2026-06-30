@@ -275,6 +275,8 @@ class TaskService:
         if not title:
             if source_type == "youtube":
                 title = await self.video_service.get_video_title(url)
+            elif source_type == "local_watch":
+                title = Path(url.removeprefix("watch://")).stem or "Watched Video"
             else:
                 title = "Uploaded Video"
 

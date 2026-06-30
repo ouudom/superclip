@@ -25,6 +25,8 @@ from .workers.job_queue import JobQueue
 from .api.routes import tasks
 from .api.routes.agents import router as agents_router
 from .api.routes.admin import router as admin_router
+from .api.routes.publishing import router as publishing_router
+from .api.routes.sources import router as sources_router
 from .api.routes.workflows import router as workflows_router
 from .observability import (
     TRACE_HEADER,
@@ -167,6 +169,8 @@ def create_app(
 
     app.include_router(tasks.router)
     app.include_router(agents_router)
+    app.include_router(sources_router)
+    app.include_router(publishing_router)
     app.include_router(workflows_router)
     app.include_router(admin_router)
 

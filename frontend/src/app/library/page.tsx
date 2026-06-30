@@ -250,6 +250,9 @@ export default function LibraryPage() {
             <Link href="/list">
               <Button variant="outline" size="sm">Generations</Button>
             </Link>
+            <Link href="/publishing">
+              <Button variant="outline" size="sm">Publishing</Button>
+            </Link>
           </div>
           <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
             <div>

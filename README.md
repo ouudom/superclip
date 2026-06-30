@@ -86,6 +86,11 @@ GOOGLE_API_KEY=your_google_api_key
 # OLLAMA_BASE_URL=  # Optional; defaults to localhost locally, host.docker.internal in Docker
 # OLLAMA_API_KEY=your_ollama_api_key  # Optional (Ollama Cloud)
 
+# Option E: 9router (local OpenAI-compatible endpoint)
+# LLM=9router:your-model
+# NINEROUTER_BASE_URL=  # Optional; defaults to localhost:4000/v1 locally, host.docker.internal:4000/v1 in Docker
+# NINEROUTER_API_KEY=your_9router_key  # Optional
+
 # Optional: Auth secret (change in production)
 BETTER_AUTH_SECRET=change_this_in_production
 

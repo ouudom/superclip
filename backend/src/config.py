@@ -8,6 +8,8 @@ load_dotenv()
 _config_override = None
 LOCAL_OLLAMA_BASE_URL = "http://localhost:11434/v1"
 DOCKER_OLLAMA_BASE_URL = "http://host.docker.internal:11434/v1"
+LOCAL_NINEROUTER_BASE_URL = "http://localhost:4000/v1"
+DOCKER_NINEROUTER_BASE_URL = "http://host.docker.internal:4000/v1"
 
 
 class Config:
@@ -18,6 +20,8 @@ class Config:
         self.youtube_data_api_key = self._get_runtime_setting("YOUTUBE_DATA_API_KEY")
         self.ollama_base_url = self._get_runtime_setting("OLLAMA_BASE_URL")
         self.ollama_api_key = self._get_runtime_setting("OLLAMA_API_KEY")
+        self.ninerouter_base_url = self._get_runtime_setting("NINEROUTER_BASE_URL")
+        self.ninerouter_api_key = self._get_runtime_setting("NINEROUTER_API_KEY")
 
         self.whisper_model = os.getenv("WHISPER_MODEL", "base")
         self.llm = self._get_runtime_setting("LLM") or self._infer_default_llm()
@@ -47,6 +51,8 @@ class Config:
         self.clip_duration = int(os.getenv("CLIP_DURATION", "30"))  # seconds
 
         self.temp_dir = os.getenv("TEMP_DIR", "temp")
+        self.watched_source_dir = os.getenv("WATCHED_SOURCE_DIR", "watched")
+        self.publish_export_dir = os.getenv("PUBLISH_EXPORT_DIR", "exports")
         self.temp_cleanup_enabled = self._get_bool_env("TEMP_CLEANUP_ENABLED", True)
         self.temp_cleanup_max_age_hours = int(
             os.getenv("TEMP_CLEANUP_MAX_AGE_HOURS", "168")
@@ -121,6 +127,8 @@ class Config:
             "ANTHROPIC_API_KEY": self.anthropic_api_key,
             "OLLAMA_BASE_URL": self.ollama_base_url,
             "OLLAMA_API_KEY": self.ollama_api_key,
+            "NINEROUTER_BASE_URL": self.ninerouter_base_url,
+            "NINEROUTER_API_KEY": self.ninerouter_api_key,
             "YOUTUBE_DATA_API_KEY": self.youtube_data_api_key,
             "APIFY_API_TOKEN": self.apify_api_token,
             "PEXELS_API_KEY": self.pexels_api_key,
@@ -172,11 +180,20 @@ class Config:
     def resolve_ollama_base_url(self) -> str:
         return self.ollama_base_url or self._default_ollama_base_url()
 
+    def resolve_ninerouter_base_url(self) -> str:
+        return self.ninerouter_base_url or self._default_ninerouter_base_url()
+
     @staticmethod
     def _default_ollama_base_url() -> str:
         if os.path.exists("/.dockerenv"):
             return DOCKER_OLLAMA_BASE_URL
         return LOCAL_OLLAMA_BASE_URL
+
+    @staticmethod
+    def _default_ninerouter_base_url() -> str:
+        if os.path.exists("/.dockerenv"):
+            return DOCKER_NINEROUTER_BASE_URL
+        return LOCAL_NINEROUTER_BASE_URL
 
     def _infer_default_llm(self) -> str:
         """

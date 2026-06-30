@@ -176,6 +176,8 @@ model Task {
   library_metadata     TaskLibraryMetadata?
   agent_tasks          AgentTask[]
   agent_runs           AgentRun[]
+  generated_clips      GeneratedClip[]
+  publish_metadata     ClipPublishMetadata[]
 
   @@index([user_id])
   @@index([source_id])
@@ -308,6 +310,62 @@ model Source {
 
   @@index([created_at])
   @@map("sources")
+}
+
+model GeneratedClip {
+  id                 String   @id @default(uuid())
+  task_id            String   @db.VarChar(36)
+  filename           String   @db.VarChar(255)
+  file_path          String   @db.VarChar(500)
+  start_time         String   @db.VarChar(20)
+  end_time           String   @db.VarChar(20)
+  duration           Float
+  text               String?
+  relevance_score    Float
+  reasoning          String?
+  clip_order         Int
+  virality_score     Int?     @default(0)
+  hook_score         Int?     @default(0)
+  engagement_score   Int?     @default(0)
+  value_score        Int?     @default(0)
+  shareability_score Int?     @default(0)
+  hook_type          String?  @db.VarChar(50)
+  created_at         DateTime @default(now()) @db.Timestamptz
+  updated_at         DateTime @default(now()) @updatedAt @db.Timestamptz
+
+  task               Task     @relation(fields: [task_id], references: [id], onDelete: Cascade)
+  publish_metadata   ClipPublishMetadata[]
+
+  @@index([task_id])
+  @@map("generated_clips")
+}
+
+model ClipPublishMetadata {
+  id             String    @id @default(uuid())
+  clip_id        String    @db.VarChar(36)
+  task_id        String    @db.VarChar(36)
+  platform       String    @db.VarChar(40)
+  post_status    String    @default("draft") @db.VarChar(40)
+  caption        String?
+  hashtags       String[]  @default([])
+  checklist_json Json      @default("{}")
+  published_url  String?
+  published_at   DateTime? @db.Timestamptz
+  export_path    String?
+  notes          String?
+  created_at     DateTime  @default(now()) @db.Timestamptz
+  updated_at     DateTime  @default(now()) @updatedAt @db.Timestamptz
+
+  clip           GeneratedClip @relation(fields: [clip_id], references: [id], onDelete: Cascade)
+  task           Task          @relation(fields: [task_id], references: [id], onDelete: Cascade)
+
+  @@unique([clip_id, platform])
+  @@index([clip_id])
+  @@index([task_id])
+  @@index([platform])
+  @@index([post_status])
+  @@index([published_at])
+  @@map("clip_publish_metadata")
 }
 
 // Better Auth Session management

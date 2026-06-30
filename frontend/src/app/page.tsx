@@ -702,6 +702,16 @@ export default function Home() {
                   Workflows
                 </Button>
               </Link>
+              <Link href="/sources">
+                <Button variant="outline" size="sm">
+                  Sources
+                </Button>
+              </Link>
+              <Link href="/publishing">
+                <Button variant="outline" size="sm">
+                  Publishing
+                </Button>
+              </Link>
               <Link href="/agents">
                 <Button variant="outline" size="sm">
                   Agents

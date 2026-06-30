@@ -57,6 +57,16 @@ SETTING_METADATA = {
         "description": "Optional, used by hosted Ollama-compatible providers.",
         "input_type": "password",
     },
+    "NINEROUTER_BASE_URL": {
+        "label": "9router base URL",
+        "description": "OpenAI-compatible 9router endpoint URL.",
+        "input_type": "text",
+    },
+    "NINEROUTER_API_KEY": {
+        "label": "9router API key",
+        "description": "Optional for local 9router; set when endpoint requires auth.",
+        "input_type": "password",
+    },
     "YOUTUBE_DATA_API_KEY": {
         "label": "YouTube Data API key",
         "description": "Optional metadata provider key.",

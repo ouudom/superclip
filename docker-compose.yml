@@ -56,6 +56,8 @@ services:
       - ./backend/src:/app/src
       - uploads:/app/uploads
       - clips:/app/clips
+      - ${HOST_WATCHED_SOURCE_DIR:-./watched}:/app/watched
+      - ${HOST_PUBLISH_EXPORT_DIR:-./exports}:/app/exports
       - ./backend/fonts:/app/fonts
       - ./backend/transitions:/app/transitions
     environment:
@@ -63,6 +65,8 @@ services:
       - PYTHONUNBUFFERED=1
       - DATABASE_URL=postgresql+asyncpg://supoclip:supoclip_password@postgres:5432/supoclip
       - TEMP_DIR=/app/uploads
+      - WATCHED_SOURCE_DIR=/app/watched
+      - PUBLISH_EXPORT_DIR=/app/exports
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - REDIS_PASSWORD=${REDIS_PASSWORD}
@@ -79,6 +83,8 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-}
       - OLLAMA_API_KEY=${OLLAMA_API_KEY:-}
+      - NINEROUTER_BASE_URL=${NINEROUTER_BASE_URL:-}
+      - NINEROUTER_API_KEY=${NINEROUTER_API_KEY:-}
       - WHISPER_MODEL_SIZE=${WHISPER_MODEL_SIZE:-medium}
       - QUEUED_TASK_TIMEOUT_SECONDS=${QUEUED_TASK_TIMEOUT_SECONDS:-180}
       - DEFAULT_PROCESSING_MODE=${DEFAULT_PROCESSING_MODE:-fast}
@@ -151,6 +157,8 @@ services:
       - ./backend/src:/app/src
       - uploads:/app/uploads
       - clips:/app/clips
+      - ${HOST_WATCHED_SOURCE_DIR:-./watched}:/app/watched
+      - ${HOST_PUBLISH_EXPORT_DIR:-./exports}:/app/exports
       - ./backend/fonts:/app/fonts
       - ./backend/transitions:/app/transitions
     environment:
@@ -158,6 +166,8 @@ services:
       - PYTHONUNBUFFERED=1
       - DATABASE_URL=postgresql+asyncpg://supoclip:supoclip_password@postgres:5432/supoclip
       - TEMP_DIR=/app/uploads
+      - WATCHED_SOURCE_DIR=/app/watched
+      - PUBLISH_EXPORT_DIR=/app/exports
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - REDIS_PASSWORD=${REDIS_PASSWORD}
@@ -174,6 +184,8 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-}
       - OLLAMA_API_KEY=${OLLAMA_API_KEY:-}
+      - NINEROUTER_BASE_URL=${NINEROUTER_BASE_URL:-}
+      - NINEROUTER_API_KEY=${NINEROUTER_API_KEY:-}
       - WHISPER_MODEL_SIZE=${WHISPER_MODEL_SIZE:-medium}
       - QUEUED_TASK_TIMEOUT_SECONDS=${QUEUED_TASK_TIMEOUT_SECONDS:-180}
       - DEFAULT_PROCESSING_MODE=${DEFAULT_PROCESSING_MODE:-fast}

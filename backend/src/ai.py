@@ -10,7 +10,9 @@ import re
 
 from pydantic_ai import Agent
 from pydantic_ai.models import Model
+from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.models.ollama import OllamaModel
+from pydantic_ai.providers.openai import OpenAIProvider
 from pydantic_ai.providers.ollama import OllamaProvider
 from pydantic import AliasChoices, BaseModel, Field, field_validator
 
@@ -295,7 +297,15 @@ Find 2-5 compelling segments that would work well as standalone clips. Quality o
 _transcript_agent: Optional[Agent[None, TranscriptAnalysis]] = None
 _transcript_agent_signature: Optional[tuple[str | None, ...]] = None
 
-SUPPORTED_LLM_PROVIDERS = {"google", "google-gla", "openai", "anthropic", "ollama"}
+SUPPORTED_LLM_PROVIDERS = {
+    "google",
+    "google-gla",
+    "openai",
+    "anthropic",
+    "ollama",
+    "9router",
+    "ninerouter",
+}
 
 
 def _split_llm_name(model_name: str) -> tuple[str, str | None]:
@@ -313,7 +323,7 @@ def _get_missing_llm_key_error(model_name: str, runtime_config: Config) -> Optio
     if provider not in SUPPORTED_LLM_PROVIDERS:
         return (
             f"Unsupported LLM provider '{provider}'. "
-            "Use google-gla:*, openai:*, anthropic:*, or ollama:*."
+            "Use google-gla:*, openai:*, anthropic:*, ollama:*, or 9router:*."
         )
 
     if not provider_model_name:
@@ -325,7 +335,7 @@ def _get_missing_llm_key_error(model_name: str, runtime_config: Config) -> Optio
     if provider in {"google", "google-gla"} and not runtime_config.google_api_key:
         return (
             "Selected LLM provider is Google, but GOOGLE_API_KEY is not set. "
-            "Set GOOGLE_API_KEY or set LLM to openai:* / anthropic:* / ollama:* with the matching API key."
+            "Set GOOGLE_API_KEY or set LLM to openai:* / anthropic:* / ollama:* / 9router:* with the matching API key."
         )
 
     if provider == "openai" and not runtime_config.openai_api_key:
@@ -345,13 +355,33 @@ def _get_missing_llm_key_error(model_name: str, runtime_config: Config) -> Optio
         # are optional and passed through as environment variables.
         return None
 
+    if provider in {"9router", "ninerouter"}:
+        # 9router is OpenAI-compatible. Local endpoints often accept no API key,
+        # but hosted/protected routers can use NINEROUTER_API_KEY.
+        return None
+
     return None
 
 
 def _build_transcript_model(runtime_config: Config) -> Model | str:
     provider, provider_model_name = _split_llm_name(runtime_config.llm)
-    if provider != "ollama":
+    if provider not in {"ollama", "9router", "ninerouter"}:
         return runtime_config.llm
+
+    if provider in {"9router", "ninerouter"}:
+        if not provider_model_name:
+            raise RuntimeError(
+                "Selected LLM provider is 9router, but no model name was provided. "
+                "Use the format 9router:<model>."
+            )
+
+        return OpenAIChatModel(
+            provider_model_name,
+            provider=OpenAIProvider(
+                base_url=runtime_config.resolve_ninerouter_base_url(),
+                api_key=runtime_config.ninerouter_api_key or "local-9router",
+            ),
+        )
 
     if not provider_model_name:
         raise RuntimeError(
@@ -380,6 +410,8 @@ def get_transcript_agent() -> Agent[None, TranscriptAnalysis]:
         runtime_config.anthropic_api_key,
         runtime_config.ollama_base_url,
         runtime_config.ollama_api_key,
+        runtime_config.ninerouter_base_url,
+        runtime_config.ninerouter_api_key,
     )
     if _transcript_agent is None or _transcript_agent_signature != signature:
         apply_settings_to_process_env(runtime_config.as_runtime_settings())

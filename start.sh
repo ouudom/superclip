@@ -27,6 +27,7 @@ if [ ! -f .env ]; then
     echo "     - ASSEMBLY_AI_API_KEY (required)"
     echo "     - OPENAI_API_KEY or GOOGLE_API_KEY or ANTHROPIC_API_KEY"
     echo "     - OR set LLM=ollama:<model> (optional: OLLAMA_BASE_URL, OLLAMA_API_KEY)"
+    echo "     - OR set LLM=9router:<model> (optional: NINEROUTER_BASE_URL, NINEROUTER_API_KEY)"
     echo ""
     exit 1
 fi
@@ -36,11 +37,11 @@ source .env
 
 if [ -n "${LLM:-}" ]; then
     case "$LLM" in
-        google:*|google-gla:*|openai:*|anthropic:*|ollama:*)
+        google:*|google-gla:*|openai:*|anthropic:*|ollama:*|9router:*|ninerouter:*)
             ;;
         *)
             echo -e "${YELLOW}Warning: Unsupported LLM value '$LLM'${NC}"
-            echo "Use google-gla:*, openai:*, anthropic:*, or ollama:*"
+            echo "Use google-gla:*, openai:*, anthropic:*, ollama:*, or 9router:*"
             echo ""
             ;;
     esac
@@ -59,14 +60,21 @@ if [ "${LLM:-}" = "ollama:" ]; then
 elif [[ "${LLM:-}" == ollama:* ]] && [ -z "${OLLAMA_BASE_URL:-}" ]; then
     echo "Ollama base URL is not set; SupoClip will use its local/Docker default."
     echo ""
+elif [ "${LLM:-}" = "9router:" ] || [ "${LLM:-}" = "ninerouter:" ]; then
+    echo -e "${YELLOW}Warning: LLM=$LLM is missing a model name${NC}"
+    echo "Use a value like LLM=9router:your-model"
+    echo ""
+elif [[ "${LLM:-}" == 9router:* || "${LLM:-}" == ninerouter:* ]] && [ -z "${NINEROUTER_BASE_URL:-}" ]; then
+    echo "9router base URL is not set; SupoClip will use its local/Docker default."
+    echo ""
 fi
 
 if [ -z "$OPENAI_API_KEY" ] && [ -z "$GOOGLE_API_KEY" ] && [ -z "$ANTHROPIC_API_KEY" ]; then
-    if [[ "${LLM:-}" == ollama:* ]]; then
+    if [[ "${LLM:-}" == ollama:* || "${LLM:-}" == 9router:* || "${LLM:-}" == ninerouter:* ]]; then
         :
     else
     echo -e "${YELLOW}Warning: No AI provider API key is set in .env${NC}"
-    echo "You need at least one of: OPENAI_API_KEY, GOOGLE_API_KEY, ANTHROPIC_API_KEY, or LLM=ollama:<model>"
+    echo "You need at least one of: OPENAI_API_KEY, GOOGLE_API_KEY, ANTHROPIC_API_KEY, LLM=ollama:<model>, or LLM=9router:<model>"
     echo ""
     fi
 fi
