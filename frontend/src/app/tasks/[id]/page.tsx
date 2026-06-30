@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -89,6 +89,18 @@ interface TaskDetails {
   progress?: number;
   progress_message?: string;
   error_code?: string | null;
+  error_message?: string | null;
+  current_stage?: StageKey | string | null;
+  failed_stage?: StageKey | string | null;
+  resume_from_stage?: StageKey | string | null;
+  stage_progress_json?: string | null;
+  stages?: StagePayload | null;
+  retry_count?: number;
+  max_retries?: number;
+  dead_letter?: boolean;
+  dead_letter_payload?: { error?: string; tries?: number; raw?: unknown } | null;
+  resume_action_label?: string;
+  last_error_at?: string | null;
   clips_count: number;
   created_at: string;
   updated_at: string;
@@ -106,6 +118,229 @@ interface TaskDetails {
 interface FontOption {
   name: string;
   display_name: string;
+}
+
+type StageKey = "queue" | "download" | "transcribe" | "analyze" | "render" | "complete";
+type StageState = "pending" | "active" | "done" | "failed";
+type StagePayload = Partial<Record<StageKey, { state?: StageState; progress?: number | null }>>;
+
+interface ProcessingStage {
+  key: StageKey;
+  label: string;
+  detail: string;
+  startProgress: number;
+  state: StageState;
+  percent: number;
+}
+
+const PROCESSING_STAGES: Array<Omit<ProcessingStage, "state" | "percent">> = [
+  {
+    key: "queue",
+    label: "Queued",
+    detail: "Waiting for worker",
+    startProgress: 0,
+  },
+  {
+    key: "download",
+    label: "Download",
+    detail: "Fetch source video",
+    startProgress: 10,
+  },
+  {
+    key: "transcribe",
+    label: "Transcribe",
+    detail: "Generate transcript",
+    startProgress: 30,
+  },
+  {
+    key: "analyze",
+    label: "Analyze",
+    detail: "Find clip moments",
+    startProgress: 50,
+  },
+  {
+    key: "render",
+    label: "Render",
+    detail: "Create vertical clips",
+    startProgress: 70,
+  },
+  {
+    key: "complete",
+    label: "Complete",
+    detail: "Ready to edit",
+    startProgress: 100,
+  },
+];
+
+function inferStageKey(status: string | undefined, progress: number, message: string, errorCode?: string | null): StageKey {
+  const normalizedMessage = message.toLowerCase();
+  const normalizedErrorCode = (errorCode || "").toLowerCase();
+
+  if (status === "completed") return "complete";
+
+  if (normalizedErrorCode.includes("download") || normalizedMessage.includes("download")) return "download";
+  if (
+    normalizedErrorCode.includes("analysis") ||
+    normalizedMessage.includes("analyz") ||
+    normalizedMessage.includes("usable clip") ||
+    normalizedMessage.includes("no clip")
+  ) {
+    return "analyze";
+  }
+  if (
+    normalizedErrorCode.includes("transcript") ||
+    normalizedErrorCode.includes("transcription") ||
+    normalizedMessage.includes("transcript")
+  ) {
+    return "transcribe";
+  }
+  if (
+    normalizedErrorCode.includes("render") ||
+    normalizedMessage.includes("creating clip") ||
+    normalizedMessage.includes("video clips") ||
+    normalizedMessage.includes("ffmpeg") ||
+    progress >= 70
+  ) {
+    return "render";
+  }
+  if (status === "queued" || progress < 10) return "queue";
+  if (progress >= 50) return "analyze";
+  if (progress >= 30) return "transcribe";
+  return "download";
+}
+
+function buildProcessingStages(
+  task: TaskDetails | null,
+  progress: number,
+  progressMessage: string,
+): ProcessingStage[] {
+  const status = task?.status;
+  const activeProgress = Math.max(0, Math.min(100, progress || task?.progress || 0));
+  const activeMessage = progressMessage || task?.progress_message || "";
+  if (task?.stages) {
+    return PROCESSING_STAGES.map((stage) => {
+      const payload = task.stages?.[stage.key];
+      const state = payload?.state && ["pending", "active", "done", "failed"].includes(payload.state)
+        ? payload.state
+        : "pending";
+      return {
+        ...stage,
+        state,
+        percent: typeof payload?.progress === "number" ? payload.progress : stage.startProgress,
+      };
+    });
+  }
+  const persistedStage =
+    typeof task?.failed_stage === "string" && task.failed_stage
+      ? task.failed_stage
+      : typeof task?.current_stage === "string" && task.current_stage
+        ? task.current_stage
+        : null;
+  const activeStage = PROCESSING_STAGES.some((stage) => stage.key === persistedStage)
+    ? (persistedStage as StageKey)
+    : inferStageKey(status, activeProgress, activeMessage, task?.error_code);
+  const activeStageIndex = PROCESSING_STAGES.findIndex((stage) => stage.key === activeStage);
+  const failedStageIndex = status === "error" || status === "cancelled" ? activeStageIndex : -1;
+
+  return PROCESSING_STAGES.map((stage, index) => {
+    let state: StageState = "pending";
+    if (status === "completed" || activeProgress >= stage.startProgress) {
+      state = "done";
+    }
+    if (index === activeStageIndex && status !== "completed") {
+      state = "active";
+    }
+    if (failedStageIndex === index) {
+      state = "failed";
+    }
+
+    return {
+      ...stage,
+      state,
+      percent: stage.key === activeStage ? activeProgress : stage.startProgress,
+    };
+  });
+}
+
+function StageDot({ state }: { state: StageState }) {
+  const className =
+    state === "done"
+      ? "border-stone-900 bg-stone-900"
+      : state === "active"
+        ? "border-blue-600 bg-blue-600"
+        : state === "failed"
+          ? "border-red-600 bg-red-600"
+          : "border-stone-300 bg-white";
+
+  return <span className={`mt-1 h-3 w-3 shrink-0 rounded-full border ${className}`} />;
+}
+
+function ProcessingStageList({
+  stages,
+  currentMessage,
+  clipsReady,
+}: {
+  stages: ProcessingStage[];
+  currentMessage: string;
+  clipsReady: number;
+}) {
+  return (
+    <div className="w-full max-w-3xl rounded-lg border border-stone-200 bg-white p-4 shadow-sm">
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-semibold text-stone-950">Processing Stages</h2>
+          <p className="mt-1 text-xs text-stone-500">
+            {currentMessage || "Waiting for next update"}
+          </p>
+        </div>
+        {clipsReady > 0 && (
+          <Badge variant="outline" className="shrink-0">
+            {clipsReady} ready
+          </Badge>
+        )}
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {stages.map((stage) => (
+          <div
+            key={stage.key}
+            className={`rounded-md border p-3 ${
+              stage.state === "failed"
+                ? "border-red-200 bg-red-50"
+                : stage.state === "active"
+                  ? "border-blue-200 bg-blue-50"
+                  : stage.state === "done"
+                    ? "border-stone-200 bg-stone-50"
+                    : "border-stone-200 bg-white"
+            }`}
+          >
+            <div className="flex items-start gap-3">
+              <StageDot state={stage.state} />
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="truncate text-sm font-medium text-stone-950">{stage.label}</p>
+                  <span className="text-xs tabular-nums text-stone-500">
+                    {stage.state === "pending" ? "--" : `${stage.percent}%`}
+                  </span>
+                </div>
+                <p className="mt-1 text-xs text-stone-500">{stage.detail}</p>
+                <p
+                  className={`mt-2 text-xs font-medium capitalize ${
+                    stage.state === "failed"
+                      ? "text-red-700"
+                      : stage.state === "active"
+                        ? "text-blue-700"
+                        : "text-stone-500"
+                  }`}
+                >
+                  {stage.state}
+                </p>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 export default function TaskPage() {
@@ -151,6 +386,20 @@ export default function TaskPage() {
     Array<{ id: string; name: string; description: string; animation: string }>
   >([]);
   const hasTriggeredAutoRefresh = useRef(false);
+  const processingStages = useMemo(
+    () => buildProcessingStages(task, progress, progressMessage),
+    [
+      task?.status,
+      task?.progress,
+      task?.progress_message,
+      task?.error_code,
+      task?.current_stage,
+      task?.failed_stage,
+      task?.stages,
+      progress,
+      progressMessage,
+    ],
+  );
 
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
   const taskApiUrl = "/api/tasks";
@@ -171,7 +420,7 @@ export default function TaskPage() {
   }, []);
 
   const getTaskFailureMessage = useCallback((taskData: TaskDetails | null) => {
-    const message = taskData?.progress_message || progressMessage;
+    const message = taskData?.error_message || taskData?.progress_message || progressMessage;
     if (typeof message === "string" && message.trim()) {
       return message.trim();
     }
@@ -215,7 +464,7 @@ export default function TaskPage() {
         setProjectFilteredWords((taskData.filtered_words || []).join(", "));
 
         // Fetch clips for active/completed/error states so partial clips stay visible.
-        if (["completed", "processing", "error"].includes(taskData.status)) {
+        if (["completed", "processing", "retrying", "error", "cancelled"].includes(taskData.status)) {
           const clipsResponse = await fetch(`${taskApiUrl}/${params.id}/clips`, {
             cache: "no-store",
           });
@@ -227,7 +476,7 @@ export default function TaskPage() {
           const clipsData = await clipsResponse.json();
           const nextClips = clipsData.clips || [];
           setClips((prev) => {
-            if (taskData.status === "completed" || taskData.status === "error") {
+            if (["completed", "error", "cancelled"].includes(taskData.status)) {
               return nextClips;
             }
 
@@ -305,8 +554,8 @@ export default function TaskPage() {
     const taskStatus = task?.status;
     if (!params.id || !taskStatus) return;
 
-    // Only connect to SSE if task is queued or processing
-    if (taskStatus !== "queued" && taskStatus !== "processing") return;
+    // Only connect to SSE if task is active
+    if (!["queued", "processing", "retrying"].includes(taskStatus)) return;
 
     const eventSource = new EventSource(`${taskApiUrl}/${params.id}/progress`);
 
@@ -325,6 +574,15 @@ export default function TaskPage() {
                 status: data.status,
                 progress: data.progress ?? currentTask.progress,
                 progress_message: data.message ?? currentTask.progress_message,
+                current_stage: data.current_stage ?? currentTask.current_stage,
+                failed_stage: data.failed_stage ?? currentTask.failed_stage,
+                resume_from_stage: data.resume_from_stage ?? currentTask.resume_from_stage,
+                resume_action_label: data.resume_action_label ?? currentTask.resume_action_label,
+                error_code: data.error_code ?? currentTask.error_code,
+                error_message: data.error_message ?? currentTask.error_message,
+                retry_count: data.retry_count ?? currentTask.retry_count,
+                max_retries: data.max_retries ?? currentTask.max_retries,
+                stages: data.stages ?? currentTask.stages,
               }
             : currentTask,
         );
@@ -352,6 +610,15 @@ export default function TaskPage() {
                 status: data.status,
                 progress: data.progress ?? currentTask.progress,
                 progress_message: data.message ?? currentTask.progress_message,
+                current_stage: data.current_stage ?? currentTask.current_stage,
+                failed_stage: data.failed_stage ?? currentTask.failed_stage,
+                resume_from_stage: data.resume_from_stage ?? currentTask.resume_from_stage,
+                resume_action_label: data.resume_action_label ?? currentTask.resume_action_label,
+                error_code: data.error_code ?? currentTask.error_code,
+                error_message: data.error_message ?? currentTask.error_message,
+                retry_count: data.retry_count ?? currentTask.retry_count,
+                max_retries: data.max_retries ?? currentTask.max_retries,
+                stages: data.stages ?? currentTask.stages,
               }
             : currentTask,
         );
@@ -947,6 +1214,14 @@ export default function TaskPage() {
               )}
             </div>
 
+            <div className="flex justify-center">
+              <ProcessingStageList
+                stages={processingStages}
+                currentMessage={progressMessage || task.progress_message || ""}
+                clipsReady={clips.length}
+              />
+            </div>
+
             {/* Live clips grid — shows clips as they render */}
             {clips.length > 0 && (
               <div className="grid gap-6">
@@ -1011,21 +1286,32 @@ export default function TaskPage() {
               <span className="w-2 h-2 bg-neutral-300 rounded-full animate-[pulse_1.4s_ease-in-out_0.4s_infinite]" />
             </div>
           </div>
-        ) : task?.status === "error" ? (
+        ) : task?.status === "error" || task?.status === "cancelled" ? (
           <div className="space-y-6">
             <Card>
               <CardContent className="p-6">
                 <div className="flex flex-col gap-5 md:flex-row md:items-start md:justify-between">
                   <div className="flex gap-4">
-                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-red-50 text-red-600">
+                    <div
+                      className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full ${
+                        task.status === "error" ? "bg-red-50 text-red-600" : "bg-stone-100 text-stone-700"
+                      }`}
+                    >
                       <AlertCircle className="h-6 w-6" />
                     </div>
                     <div>
                       <div className="mb-2 flex flex-wrap items-center gap-2">
-                        <h2 className="text-xl font-semibold text-stone-950">Processing Failed</h2>
+                        <h2 className="text-xl font-semibold text-stone-950">
+                          {task.status === "error" ? "Processing Failed" : "Processing Cancelled"}
+                        </h2>
                         {task.error_code && (
                           <Badge variant="outline" className="border-red-200 bg-red-50 text-red-700">
                             {task.error_code}
+                          </Badge>
+                        )}
+                        {task.resume_from_stage && (
+                          <Badge variant="outline" className="border-stone-200 bg-stone-50 text-stone-700">
+                            Resume: {task.resume_from_stage}
                           </Badge>
                         )}
                       </div>
@@ -1044,7 +1330,7 @@ export default function TaskPage() {
                       disabled={isResuming}
                     >
                       <RefreshCw className={`h-4 w-4 ${isResuming ? "animate-spin" : ""}`} />
-                      {isResuming ? "Resuming" : "Retry"}
+                      {isResuming ? "Resuming" : task.status === "error" ? "Retry" : "Resume"}
                     </Button>
                     <Link href="/">
                       <Button variant="outline">
@@ -1056,6 +1342,12 @@ export default function TaskPage() {
                 </div>
               </CardContent>
             </Card>
+
+            <ProcessingStageList
+              stages={processingStages}
+              currentMessage={getTaskFailureMessage(task)}
+              clipsReady={clips.length}
+            />
 
             {clips.length > 0 && (
               <div className="grid gap-6">

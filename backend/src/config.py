@@ -47,6 +47,10 @@ class Config:
         self.clip_duration = int(os.getenv("CLIP_DURATION", "30"))  # seconds
 
         self.temp_dir = os.getenv("TEMP_DIR", "temp")
+        self.temp_cleanup_enabled = self._get_bool_env("TEMP_CLEANUP_ENABLED", True)
+        self.temp_cleanup_max_age_hours = int(
+            os.getenv("TEMP_CLEANUP_MAX_AGE_HOURS", "168")
+        )
 
         # Redis configuration
         self.redis_host = os.getenv("REDIS_HOST", "localhost")

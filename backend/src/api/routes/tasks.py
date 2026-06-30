@@ -127,6 +127,63 @@ def _merge_task_source_metadata(
     return merged
 
 
+def _task_status_payload(task_id: str, task: Dict[str, Any]) -> Dict[str, Any]:
+    stages = task.get("stages")
+    if stages is None:
+        raw_stages = task.get("stage_progress_json")
+        if isinstance(raw_stages, str) and raw_stages.strip():
+            try:
+                stages = json.loads(raw_stages)
+            except json.JSONDecodeError:
+                stages = None
+    if stages is None:
+        current_stage = task.get("current_stage") or "queue"
+        failed_stage = task.get("failed_stage")
+        stages = TaskService.stage_progress_dict(
+            str(failed_stage or current_stage),
+            int(task.get("progress") or 0),
+            str(failed_stage) if failed_stage else None,
+        )
+
+    return {
+        "task_id": task_id,
+        "status": task.get("status"),
+        "progress": task.get("progress", 0),
+        "message": task.get("progress_message", ""),
+        "current_stage": task.get("current_stage"),
+        "failed_stage": task.get("failed_stage"),
+        "resume_from_stage": task.get("resume_from_stage"),
+        "resume_action_label": task.get("resume_action_label")
+        or TaskService.resume_action_label(task),
+        "error_code": task.get("error_code"),
+        "error_message": task.get("error_message"),
+        "retry_count": task.get("retry_count") or 0,
+        "max_retries": task.get("max_retries") or 3,
+        "stages": stages,
+    }
+
+
+async def _load_dead_letter_payload(task_id: str) -> Dict[str, Any] | None:
+    runtime_config = get_config()
+    redis_client = redis.Redis(
+        host=runtime_config.redis_host,
+        port=runtime_config.redis_port,
+        password=runtime_config.redis_password,
+        decode_responses=True,
+    )
+    try:
+        payload = await redis_client.get(f"dead_letter:{task_id}")
+    finally:
+        await redis_client.aclose()
+    if not payload:
+        return None
+    try:
+        loaded = json.loads(payload)
+    except json.JSONDecodeError:
+        return {"raw": payload}
+    return loaded if isinstance(loaded, dict) else {"raw": loaded}
+
+
 async def _require_task_owner(
     request: Request, task_service: TaskService, db: AsyncSession, task_id: str
 ):
@@ -285,6 +342,10 @@ async def get_task(
         if not task:
             raise HTTPException(status_code=404, detail="Task not found")
 
+        dead_letter = await _load_dead_letter_payload(task_id)
+        task["dead_letter"] = bool(dead_letter)
+        task["dead_letter_payload"] = dead_letter
+
         return task
 
     except HTTPException:
@@ -343,18 +404,11 @@ async def get_task_progress_sse(task_id: str, request: Request):
         # Send initial task status
         yield {
             "event": "status",
-            "data": json.dumps(
-                {
-                    "task_id": task_id,
-                    "status": task.get("status"),
-                    "progress": task.get("progress", 0),
-                    "message": task.get("progress_message", ""),
-                }
-            ),
+            "data": json.dumps(_task_status_payload(task_id, task)),
         }
 
         # If task is already completed or error, close connection
-        if task.get("status") in ["completed", "error"]:
+        if task.get("status") in ["completed", "error", "cancelled"]:
             yield {"event": "close", "data": json.dumps({"status": task.get("status")})}
             return
 
@@ -376,7 +430,7 @@ async def get_task_progress_sse(task_id: str, request: Request):
                 yield {"event": event_type, "data": json.dumps(progress_data)}
 
                 # Close connection if task is done
-                if progress_data.get("status") in ["completed", "error"]:
+                if progress_data.get("status") in ["completed", "error", "cancelled"]:
                     yield {
                         "event": "close",
                         "data": json.dumps({"status": progress_data.get("status")}),
@@ -877,6 +931,16 @@ async def resume_task(
             "queued",
             progress=0,
             progress_message="Re-queued by user",
+            current_stage="queue",
+            failed_stage="",
+            resume_from_stage=task.get("resume_from_stage") or task.get("failed_stage") or "",
+            stage_progress_json=TaskService._stage_progress_payload("queue", 0),
+        )
+        await task_service.task_repo.update_task_runtime_metadata(
+            db,
+            task_id,
+            error_code="",
+            error_message="",
         )
 
         processing_mode = (

@@ -17,6 +17,7 @@ from ..repositories.task_repository import TaskRepository
 from ..repositories.source_repository import SourceRepository
 from ..repositories.clip_repository import ClipRepository
 from ..repositories.cache_repository import CacheRepository
+from ..repositories.task_artifact_repository import TaskArtifactRepository
 from .video_service import VideoService
 from ..config import Config, get_config
 from ..clip_editor import (
@@ -40,6 +41,15 @@ from ..clip_source_map import (
 
 logger = logging.getLogger(__name__)
 
+TASK_STAGE_LABELS = {
+    "queue": "Queue",
+    "download": "Download",
+    "transcribe": "Transcribe",
+    "analyze": "Analyze",
+    "render": "Render",
+    "complete": "Complete",
+}
+
 
 class TaskService:
     """Service for task workflow orchestration."""
@@ -50,6 +60,7 @@ class TaskService:
         self.source_repo = SourceRepository()
         self.clip_repo = ClipRepository()
         self.cache_repo = CacheRepository()
+        self.artifact_repo = TaskArtifactRepository()
         self.video_service = VideoService()
         self.config = config or get_config()
 
@@ -79,6 +90,71 @@ class TaskService:
         )
         age_seconds = (now - updated_at).total_seconds()
         return age_seconds >= self.config.queued_task_timeout_seconds
+
+    @staticmethod
+    def _stage_for_progress(progress: int, message: str = "") -> str:
+        normalized = (message or "").lower()
+        if "download" in normalized:
+            return "download"
+        if "analyz" in normalized or "usable clip" in normalized or "no clip" in normalized:
+            return "analyze"
+        if "transcript" in normalized:
+            return "transcribe"
+        if "clip" in normalized or "render" in normalized or progress >= 70:
+            return "render"
+        if progress >= 50:
+            return "analyze"
+        if progress >= 30:
+            return "transcribe"
+        if progress >= 10:
+            return "download"
+        return "queue"
+
+    @classmethod
+    def _stage_progress_payload(
+        cls, current_stage: str, progress: int, failed_stage: Optional[str] = None
+    ) -> str:
+        stages = ["queue", "download", "transcribe", "analyze", "render", "complete"]
+        current_index = stages.index(current_stage) if current_stage in stages else 0
+        payload: Dict[str, Dict[str, Any]] = {}
+        for index, stage in enumerate(stages):
+            state = "pending"
+            if current_stage == "complete" or index < current_index:
+                state = "done"
+            elif index == current_index:
+                state = "active"
+            if failed_stage == stage:
+                state = "failed"
+            payload[stage] = {"state": state, "progress": progress if index == current_index else None}
+        return json.dumps(payload)
+
+    @classmethod
+    def stage_progress_dict(
+        cls, current_stage: str, progress: int, failed_stage: Optional[str] = None
+    ) -> Dict[str, Dict[str, Any]]:
+        return json.loads(cls._stage_progress_payload(current_stage, progress, failed_stage))
+
+    @staticmethod
+    def resume_action_label(task: Dict[str, Any]) -> str:
+        stage = task.get("resume_from_stage") or task.get("failed_stage")
+        label = TASK_STAGE_LABELS.get(str(stage), "Last Stage")
+        if task.get("status") == "cancelled":
+            return f"Resume from {label}"
+        return f"Retry from {label}"
+
+    @staticmethod
+    def _artifact_text(artifact: Optional[Dict[str, Any]]) -> Optional[str]:
+        if not artifact:
+            return None
+        value = artifact.get("text_value")
+        return value if isinstance(value, str) and value else None
+
+    @staticmethod
+    def _artifact_file_path(artifact: Optional[Dict[str, Any]]) -> Optional[str]:
+        if not artifact:
+            return None
+        value = artifact.get("file_path")
+        return value if isinstance(value, str) and value else None
 
     async def create_task_with_source(
         self,
@@ -160,13 +236,50 @@ class TaskService:
             cache_key = self._build_cache_key(url, source_type, processing_mode)
 
             cache_entry = await self.cache_repo.get_cache(self.db, cache_key)
+            artifacts = await self.artifact_repo.get_artifacts_by_task(
+                self.db, task_id
+            )
+            artifact_video_path = self._artifact_file_path(artifacts.get("video_path"))
+            if artifact_video_path and not Path(artifact_video_path).exists():
+                logger.warning(
+                    "Saved video artifact for task %s is missing: %s",
+                    task_id,
+                    artifact_video_path,
+                )
+                artifact_video_path = None
             cached_transcript = (
-                cache_entry.get("transcript_text") if cache_entry else None
+                self._artifact_text(artifacts.get("transcript"))
+                or (cache_entry.get("transcript_text") if cache_entry else None)
             )
             cached_analysis_json = (
-                cache_entry.get("analysis_json") if cache_entry else None
+                self._artifact_text(artifacts.get("analysis"))
+                or (cache_entry.get("analysis_json") if cache_entry else None)
             )
-            cache_hit = bool(cached_transcript and cached_analysis_json)
+            cache_hit = bool(
+                cache_entry
+                and cache_entry.get("transcript_text")
+                and cache_entry.get("analysis_json")
+            )
+
+            if cached_transcript and not self._artifact_text(artifacts.get("transcript")):
+                await self.artifact_repo.upsert_artifact(
+                    self.db,
+                    task_id,
+                    "transcript",
+                    text_value=cached_transcript,
+                )
+            if cached_analysis_json and not self._artifact_text(artifacts.get("analysis")):
+                try:
+                    analysis_payload = json.loads(cached_analysis_json)
+                except json.JSONDecodeError:
+                    analysis_payload = None
+                await self.artifact_repo.upsert_artifact(
+                    self.db,
+                    task_id,
+                    "analysis",
+                    text_value=cached_analysis_json,
+                    json_value=analysis_payload,
+                )
 
             await self.task_repo.update_task_runtime_metadata(
                 self.db,
@@ -182,21 +295,55 @@ class TaskService:
                 "processing",
                 progress=0,
                 progress_message="Starting...",
+                current_stage="queue",
+                failed_stage="",
+                stage_progress_json=self._stage_progress_payload("queue", 0),
             )
 
             # Progress callback wrapper
             async def update_progress(
                 progress: int, message: str, status: str = "processing"
             ):
+                current_stage = (
+                    "complete"
+                    if status == "completed"
+                    else self._stage_for_progress(progress, message)
+                )
                 await self.task_repo.update_task_status(
                     self.db,
                     task_id,
                     status,
                     progress=progress,
                     progress_message=message,
+                    current_stage=current_stage,
+                    stage_progress_json=self._stage_progress_payload(
+                        current_stage, progress
+                    ),
                 )
                 if progress_callback:
-                    await progress_callback(progress, message, status)
+                    await progress_callback(
+                        progress,
+                        message,
+                        status,
+                        {
+                            "current_stage": current_stage,
+                            "failed_stage": None,
+                            "resume_from_stage": None,
+                            "stages": self.stage_progress_dict(
+                                current_stage, progress
+                            ),
+                        },
+                    )
+
+            async def save_artifact(artifact_type: str, payload: Dict[str, Any]):
+                await self.artifact_repo.upsert_artifact(
+                    self.db,
+                    task_id,
+                    artifact_type,
+                    text_value=payload.get("text_value"),
+                    json_value=payload.get("json_value"),
+                    file_path=payload.get("file_path"),
+                )
 
             # Process video with progress updates
             pipeline_start = perf_counter()
@@ -211,9 +358,11 @@ class TaskService:
                 processing_mode=processing_mode,
                 output_format=output_format,
                 add_subtitles=add_subtitles,
+                cached_video_path=artifact_video_path,
                 cached_transcript=cached_transcript,
                 cached_analysis_json=cached_analysis_json,
                 progress_callback=update_progress,
+                artifact_callback=save_artifact,
                 should_cancel=should_cancel,
             )
             stage_timings["pipeline_seconds"] = round(
@@ -232,6 +381,7 @@ class TaskService:
                     cache_key=cache_key,
                     source_url=url,
                     source_type=source_type,
+                    video_path=result.get("video_path"),
                     transcript_text=result.get("transcript"),
                     analysis_json=None,
                 )
@@ -244,6 +394,7 @@ class TaskService:
                 cache_key=cache_key,
                 source_url=url,
                 source_type=source_type,
+                video_path=result.get("video_path"),
                 transcript_text=result.get("transcript"),
                 analysis_json=result.get("analysis_json"),
             )
@@ -253,10 +404,27 @@ class TaskService:
             clips_output_dir = Path(self.config.temp_dir) / "clips"
             clips_output_dir.mkdir(parents=True, exist_ok=True)
 
-            clip_ids = []
+            existing_clips = await self.clip_repo.get_clips_by_task(self.db, task_id)
+            existing_by_order = {
+                int(clip.get("clip_order")): clip
+                for clip in existing_clips
+                if clip.get("clip_order") is not None
+            }
+            clip_ids = [clip["id"] for clip in existing_clips]
             render_start = perf_counter()
 
             for i, segment in enumerate(segments_to_render):
+                clip_order = i + 1
+                existing_clip = existing_by_order.get(clip_order)
+                if existing_clip:
+                    logger.info(
+                        "Skipping render for task %s clip %s; existing clip %s found",
+                        task_id,
+                        clip_order,
+                        existing_clip.get("id"),
+                    )
+                    continue
+
                 # Check cancellation
                 if should_cancel and await should_cancel():
                     raise Exception("Task cancelled")
@@ -267,7 +435,7 @@ class TaskService:
                 ) if total_clips > 0 else 95
                 await update_progress(
                     clip_progress,
-                    f"Creating clip {i + 1}/{total_clips}...",
+                    f"Creating clip {clip_order}/{total_clips}...",
                 )
 
                 # Render single clip in thread pool
@@ -299,7 +467,7 @@ class TaskService:
                     text=clip_info.get("text", ""),
                     relevance_score=clip_info.get("relevance_score", 0.0),
                     reasoning=clip_info.get("reasoning", ""),
-                    clip_order=i + 1,
+                    clip_order=clip_order,
                     virality_score=clip_info.get("virality_score", 0),
                     hook_score=clip_info.get("hook_score", 0),
                     engagement_score=clip_info.get("engagement_score", 0),
@@ -321,6 +489,14 @@ class TaskService:
                     if clip_record:
                         await clip_ready_callback(i, total_clips, clip_record)
 
+            final_clips = await self.clip_repo.get_clips_by_task(self.db, task_id)
+            if len(final_clips) < total_clips:
+                raise RuntimeError(
+                    f"Render incomplete: {len(final_clips)}/{total_clips} clips saved"
+                )
+            clip_ids = [clip["id"] for clip in final_clips]
+            await self.task_repo.update_task_clips(self.db, task_id, clip_ids)
+
             stage_timings["render_seconds"] = round(
                 perf_counter() - render_start, 3
             )
@@ -332,6 +508,10 @@ class TaskService:
                 "completed",
                 progress=100,
                 progress_message="Complete!",
+                current_stage="complete",
+                failed_stage="",
+                resume_from_stage="",
+                stage_progress_json=self._stage_progress_payload("complete", 100),
             )
 
             if progress_callback:
@@ -343,6 +523,7 @@ class TaskService:
                 completed_at=datetime.utcnow(),
                 stage_timings_json=json.dumps(stage_timings),
                 error_code="",
+                error_message="",
             )
 
             logger.info(
@@ -360,16 +541,31 @@ class TaskService:
         except Exception as e:
             logger.error(f"Error processing task {task_id}: {e}")
             if str(e) == "Task cancelled":
+                failed_stage = self._stage_for_progress(0, "Cancelled by user")
                 await self.task_repo.update_task_status(
                     self.db,
                     task_id,
                     "cancelled",
                     progress=0,
                     progress_message="Cancelled by user",
+                    failed_stage=failed_stage,
+                    resume_from_stage=failed_stage,
+                    stage_progress_json=self._stage_progress_payload(
+                        failed_stage, 0, failed_stage
+                    ),
                 )
                 raise
+            failed_stage = self._stage_for_progress(0, str(e))
             await self.task_repo.update_task_status(
-                self.db, task_id, "error", progress_message=str(e)
+                self.db,
+                task_id,
+                "error",
+                progress_message=str(e),
+                failed_stage=failed_stage,
+                resume_from_stage=failed_stage,
+                stage_progress_json=self._stage_progress_payload(
+                    failed_stage, 0, failed_stage
+                ),
             )
             error_code = "task_error"
             message = str(e).lower()
@@ -387,6 +583,8 @@ class TaskService:
                 task_id,
                 completed_at=datetime.utcnow(),
                 error_code=error_code,
+                error_message=str(e),
+                last_error_at=datetime.utcnow(),
             )
             raise
 
@@ -424,8 +622,26 @@ class TaskService:
         ]
         task["clips_count"] = len(clips)
         task.update(await self._load_task_source_settings(task_id))
+        task["resume_action_label"] = self.resume_action_label(task)
+        task["stages"] = self._task_stages_for_response(task)
 
         return task
+
+    @classmethod
+    def _task_stages_for_response(cls, task: Dict[str, Any]) -> Dict[str, Any]:
+        stage_payload = task.get("stage_progress_json")
+        if isinstance(stage_payload, str) and stage_payload.strip():
+            try:
+                parsed = json.loads(stage_payload)
+                if isinstance(parsed, dict):
+                    return parsed
+            except json.JSONDecodeError:
+                pass
+
+        current_stage = task.get("failed_stage") or task.get("current_stage") or "queue"
+        progress = int(task.get("progress") or 0)
+        failed_stage = current_stage if task.get("status") in {"error", "cancelled"} else None
+        return cls.stage_progress_dict(str(current_stage), progress, failed_stage)
 
     async def get_user_tasks(
         self, user_id: str, limit: int = 50

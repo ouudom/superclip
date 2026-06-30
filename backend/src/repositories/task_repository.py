@@ -139,6 +139,14 @@ class TaskRepository:
             "processing_mode": getattr(row, "processing_mode", "fast"),
             "cache_hit": getattr(row, "cache_hit", False),
             "error_code": getattr(row, "error_code", None),
+            "error_message": getattr(row, "error_message", None),
+            "current_stage": getattr(row, "current_stage", None),
+            "failed_stage": getattr(row, "failed_stage", None),
+            "resume_from_stage": getattr(row, "resume_from_stage", None),
+            "stage_progress_json": getattr(row, "stage_progress_json", None),
+            "retry_count": getattr(row, "retry_count", 0),
+            "max_retries": getattr(row, "max_retries", 3),
+            "last_error_at": getattr(row, "last_error_at", None),
             "stage_timings_json": getattr(row, "stage_timings_json", None),
             "started_at": getattr(row, "started_at", None),
             "completed_at": getattr(row, "completed_at", None),
@@ -153,9 +161,13 @@ class TaskRepository:
         task_id: str,
         cache_hit: Optional[bool] = None,
         error_code: Optional[str] = None,
+        error_message: Optional[str] = None,
         stage_timings_json: Optional[str] = None,
         started_at: Optional[datetime] = None,
         completed_at: Optional[datetime] = None,
+        last_error_at: Optional[datetime] = None,
+        retry_count: Optional[int] = None,
+        max_retries: Optional[int] = None,
     ) -> None:
         params: Dict[str, Any] = {"task_id": task_id}
         set_parts = []
@@ -168,6 +180,10 @@ class TaskRepository:
             set_parts.append("error_code = :error_code")
             params["error_code"] = error_code
 
+        if error_message is not None:
+            set_parts.append("error_message = :error_message")
+            params["error_message"] = error_message
+
         if stage_timings_json is not None:
             set_parts.append("stage_timings_json = :stage_timings_json")
             params["stage_timings_json"] = stage_timings_json
@@ -179,6 +195,18 @@ class TaskRepository:
         if completed_at is not None:
             set_parts.append("completed_at = :completed_at")
             params["completed_at"] = completed_at
+
+        if last_error_at is not None:
+            set_parts.append("last_error_at = :last_error_at")
+            params["last_error_at"] = last_error_at
+
+        if retry_count is not None:
+            set_parts.append("retry_count = :retry_count")
+            params["retry_count"] = retry_count
+
+        if max_retries is not None:
+            set_parts.append("max_retries = :max_retries")
+            params["max_retries"] = max_retries
 
         if not set_parts:
             return
@@ -289,6 +317,10 @@ class TaskRepository:
         status: str,
         progress: Optional[int] = None,
         progress_message: Optional[str] = None,
+        current_stage: Optional[str] = None,
+        failed_stage: Optional[str] = None,
+        resume_from_stage: Optional[str] = None,
+        stage_progress_json: Optional[str] = None,
     ) -> None:
         """Update task status and optional progress."""
         params = {
@@ -296,6 +328,10 @@ class TaskRepository:
             "status": status,
             "progress": progress,
             "progress_message": progress_message,
+            "current_stage": current_stage,
+            "failed_stage": failed_stage,
+            "resume_from_stage": resume_from_stage,
+            "stage_progress_json": stage_progress_json,
         }
 
         # Build dynamic query based on what's provided
@@ -306,6 +342,18 @@ class TaskRepository:
 
         if progress_message is not None:
             set_parts.append("progress_message = :progress_message")
+
+        if current_stage is not None:
+            set_parts.append("current_stage = :current_stage")
+
+        if failed_stage is not None:
+            set_parts.append("failed_stage = :failed_stage")
+
+        if resume_from_stage is not None:
+            set_parts.append("resume_from_stage = :resume_from_stage")
+
+        if stage_progress_json is not None:
+            set_parts.append("stage_progress_json = :stage_progress_json")
 
         set_parts.append("updated_at = NOW()")
 

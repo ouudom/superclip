@@ -17,7 +17,13 @@ class ProgressTracker:
         self.task_id = task_id
         self.key = f"progress:{task_id}"
 
-    async def update(self, progress: int, message: str, status: str = "processing"):
+    async def update(
+        self,
+        progress: int,
+        message: str,
+        status: str = "processing",
+        metadata: Optional[dict] = None,
+    ):
         """
         Update progress in Redis.
 
@@ -32,6 +38,8 @@ class ProgressTracker:
             "message": message,
             "status": status
         }
+        if metadata:
+            data.update(metadata)
 
         await self.redis.setex(
             self.key,

@@ -344,9 +344,13 @@ class VideoService:
         processing_mode: str = "fast",
         output_format: str = "vertical",
         add_subtitles: bool = True,
+        cached_video_path: Optional[str] = None,
         cached_transcript: Optional[str] = None,
         cached_analysis_json: Optional[str] = None,
         progress_callback: Optional[Callable[[int, str, str], Awaitable[None]]] = None,
+        artifact_callback: Optional[
+            Callable[[str, Dict[str, Any]], Awaitable[None]]
+        ] = None,
         should_cancel: Optional[Callable[[], Awaitable[bool]]] = None,
     ) -> Dict[str, Any]:
         """
@@ -362,27 +366,40 @@ class VideoService:
             if should_cancel and await should_cancel():
                 raise Exception("Task cancelled")
 
-            if progress_callback:
-                await progress_callback(10, "Downloading video...", "processing")
-
-            if source_type == "youtube":
-                video_info = await async_get_youtube_video_info(url, task_id=task_id)
-                if video_info:
-                    duration = video_info.get("duration", 0)
-                    if duration and duration > runtime_config.max_video_duration:
-                        mins = runtime_config.max_video_duration // 60
-                        raise Exception(
-                            f"Video is too long ({duration // 60} min). "
-                            f"Maximum allowed duration is {mins} minutes."
-                        )
-
-                video_path = await VideoService.download_video(url, task_id=task_id)
-                if not video_path:
-                    raise Exception("Failed to download video")
+            cached_path = Path(cached_video_path) if cached_video_path else None
+            if cached_path and cached_path.exists():
+                video_path = cached_path
+                if progress_callback:
+                    await progress_callback(
+                        20, "Using saved source video...", "processing"
+                    )
             else:
-                video_path = VideoService.resolve_local_video_path(url)
-                if not video_path.exists():
-                    raise Exception("Video file not found")
+                if progress_callback:
+                    await progress_callback(10, "Downloading video...", "processing")
+
+                if source_type == "youtube":
+                    video_info = await async_get_youtube_video_info(url, task_id=task_id)
+                    if video_info:
+                        duration = video_info.get("duration", 0)
+                        if duration and duration > runtime_config.max_video_duration:
+                            mins = runtime_config.max_video_duration // 60
+                            raise Exception(
+                                f"Video is too long ({duration // 60} min). "
+                                f"Maximum allowed duration is {mins} minutes."
+                            )
+
+                    video_path = await VideoService.download_video(url, task_id=task_id)
+                    if not video_path:
+                        raise Exception("Failed to download video")
+                else:
+                    video_path = VideoService.resolve_local_video_path(url)
+                    if not video_path.exists():
+                        raise Exception("Video file not found")
+
+                if artifact_callback:
+                    await artifact_callback(
+                        "video_path", {"file_path": str(video_path)}
+                    )
 
             # Post-download duration guard (catches cases where preflight info was unavailable)
             file_duration = VideoService._get_file_duration(video_path)
@@ -405,6 +422,10 @@ class VideoService:
                 transcript = await VideoService.generate_transcript(
                     video_path, processing_mode=processing_mode
                 )
+                if artifact_callback:
+                    await artifact_callback(
+                        "transcript", {"text_value": transcript}
+                    )
 
             # Step 3: AI analysis
             if should_cancel and await should_cancel():
@@ -521,6 +542,25 @@ class VideoService:
                     )
                 ]
 
+            analysis_json = json.dumps(
+                {
+                    "summary": relevant_parts.summary if relevant_parts else None,
+                    "key_topics": relevant_parts.key_topics
+                    if relevant_parts
+                    else [],
+                    "most_relevant_segments": segments_json,
+                }
+            )
+            if artifact_callback:
+                await artifact_callback(
+                    "analysis",
+                    {
+                        "text_value": analysis_json,
+                        "json_value": json.loads(analysis_json),
+                    },
+                )
+                await artifact_callback("segments", {"json_value": segments_json})
+
             return {
                 "segments": segments_json,
                 "segments_to_render": segments_json,
@@ -529,15 +569,7 @@ class VideoService:
                 "summary": relevant_parts.summary if relevant_parts else None,
                 "key_topics": relevant_parts.key_topics if relevant_parts else None,
                 "transcript": transcript,
-                "analysis_json": json.dumps(
-                    {
-                        "summary": relevant_parts.summary if relevant_parts else None,
-                        "key_topics": relevant_parts.key_topics
-                        if relevant_parts
-                        else [],
-                        "most_relevant_segments": segments_json,
-                    }
-                ),
+                "analysis_json": analysis_json,
             }
 
         except Exception as e:

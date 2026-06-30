@@ -58,6 +58,14 @@ CREATE TABLE tasks (
     completed_at TIMESTAMP WITH TIME ZONE,
     cache_hit BOOLEAN NOT NULL DEFAULT false,
     error_code VARCHAR(80),
+    error_message TEXT,
+    current_stage VARCHAR(40),
+    failed_stage VARCHAR(40),
+    resume_from_stage VARCHAR(40),
+    stage_progress_json TEXT,
+    retry_count INTEGER NOT NULL DEFAULT 0,
+    max_retries INTEGER NOT NULL DEFAULT 3,
+    last_error_at TIMESTAMP WITH TIME ZONE,
     stage_timings_json TEXT,
 
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
@@ -99,6 +107,18 @@ CREATE TABLE processing_cache (
     analysis_json TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE task_artifacts (
+    id VARCHAR(36) PRIMARY KEY DEFAULT uuid_generate_v4()::text,
+    task_id VARCHAR(36) NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    artifact_type VARCHAR(60) NOT NULL,
+    text_value TEXT,
+    json_value JSONB,
+    file_path TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(task_id, artifact_type)
 );
 
 -- Better Auth tables
@@ -215,8 +235,13 @@ CREATE INDEX idx_tasks_status ON tasks(status);
 CREATE INDEX idx_tasks_created_at ON tasks(created_at);
 CREATE INDEX idx_tasks_processing_mode ON tasks(processing_mode);
 CREATE INDEX idx_tasks_completed_at ON tasks(completed_at);
+CREATE INDEX idx_tasks_current_stage ON tasks(current_stage);
+CREATE INDEX idx_tasks_failed_stage ON tasks(failed_stage);
 CREATE INDEX idx_sources_created_at ON sources(created_at);
 CREATE INDEX idx_processing_cache_source_url ON processing_cache(source_url);
+CREATE INDEX idx_task_artifacts_task_id ON task_artifacts(task_id);
+CREATE INDEX idx_task_artifacts_type ON task_artifacts(artifact_type);
+CREATE INDEX idx_task_artifacts_file_path ON task_artifacts(file_path);
 CREATE INDEX idx_generated_clips_task_id ON generated_clips(task_id);
 CREATE INDEX idx_generated_clips_clip_order ON generated_clips(clip_order);
 CREATE INDEX idx_generated_clips_created_at ON generated_clips(created_at);
@@ -265,6 +290,7 @@ CREATE TRIGGER update_users_updatedAt BEFORE UPDATE ON users FOR EACH ROW EXECUT
 CREATE TRIGGER update_tasks_updated_at BEFORE UPDATE ON tasks FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 CREATE TRIGGER update_sources_updated_at BEFORE UPDATE ON sources FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 CREATE TRIGGER update_generated_clips_updated_at BEFORE UPDATE ON generated_clips FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE TRIGGER update_task_artifacts_updated_at BEFORE UPDATE ON task_artifacts FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 CREATE TRIGGER update_app_settings_updated_at BEFORE UPDATE ON app_settings FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 CREATE TRIGGER update_owner_settings_updated_at BEFORE UPDATE ON owner_settings FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 CREATE TRIGGER update_model_profiles_updated_at BEFORE UPDATE ON model_profiles FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();

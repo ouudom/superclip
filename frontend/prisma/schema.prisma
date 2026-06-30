@@ -147,6 +147,15 @@ model Task {
   status               String    @default("pending") @db.VarChar(20)
   progress             Int?      @default(0)
   progress_message     String?
+  error_code           String?   @db.VarChar(80)
+  error_message        String?
+  current_stage        String?   @db.VarChar(40)
+  failed_stage         String?   @db.VarChar(40)
+  resume_from_stage    String?   @db.VarChar(40)
+  stage_progress_json  String?
+  retry_count          Int       @default(0)
+  max_retries          Int       @default(3)
+  last_error_at        DateTime? @db.Timestamptz
 
   // Font customization fields
   font_family          String?   @default("TikTokSans-Regular") @db.VarChar(100)
@@ -161,12 +170,34 @@ model Task {
   // Relationships
   user                 User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
   source               Source?   @relation(fields: [source_id], references: [id], onDelete: SetNull)
+  artifacts            TaskArtifact[]
 
   @@index([user_id])
   @@index([source_id])
   @@index([created_at])
   @@index([status])
+  @@index([current_stage])
+  @@index([failed_stage])
   @@map("tasks")
+}
+
+model TaskArtifact {
+  id             String    @id @default(uuid())
+  task_id        String
+  artifact_type  String    @db.VarChar(60)
+  text_value     String?
+  json_value     Json?
+  file_path      String?
+  created_at     DateTime  @default(now()) @db.Timestamptz
+  updated_at     DateTime  @default(now()) @updatedAt @db.Timestamptz
+
+  task           Task      @relation(fields: [task_id], references: [id], onDelete: Cascade)
+
+  @@unique([task_id, artifact_type])
+  @@index([task_id])
+  @@index([artifact_type])
+  @@index([file_path])
+  @@map("task_artifacts")
 }
 
 model Source {

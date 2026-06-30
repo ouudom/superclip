@@ -15,6 +15,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import relationship, Mapped, mapped_column
 from sqlalchemy.sql import func
+from sqlalchemy.dialects.postgresql import JSONB
 import uuid
 
 from .database import Base
@@ -240,6 +241,20 @@ class Task(Base):
         Boolean, nullable=False, server_default=sql_text("'false'")
     )
     error_code: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    current_stage: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    failed_stage: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    resume_from_stage: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    stage_progress_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    retry_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=sql_text("'0'")
+    )
+    max_retries: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=sql_text("'3'")
+    )
+    last_error_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     stage_timings_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
@@ -254,6 +269,9 @@ class Task(Base):
     source: Mapped[Optional["Source"]] = relationship("Source", back_populates="tasks")
     generated_clips: Mapped[List["GeneratedClip"]] = relationship(
         "GeneratedClip", back_populates="task", cascade="all, delete-orphan"
+    )
+    artifacts: Mapped[List["TaskArtifact"]] = relationship(
+        "TaskArtifact", back_populates="task", cascade="all, delete-orphan"
     )
 
 
@@ -359,4 +377,34 @@ class ProcessingCache(Base):
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class TaskArtifact(Base):
+    __tablename__ = "task_artifacts"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=generate_uuid_string
+    )
+    task_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False
+    )
+    artifact_type: Mapped[str] = mapped_column(String(60), nullable=False)
+    text_value: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    json_value: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    file_path: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    task: Mapped["Task"] = relationship("Task", back_populates="artifacts")
+
+    __table_args__ = (
+        CheckConstraint(
+            "artifact_type <> ''",
+            name="check_task_artifact_type_not_empty",
+        ),
     )

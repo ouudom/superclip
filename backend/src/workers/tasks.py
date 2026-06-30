@@ -6,6 +6,8 @@ import logging
 from typing import Dict, Any
 import json
 
+from arq import cron
+
 from ..observability import configure_logging, set_trace_id
 
 configure_logging()
@@ -62,9 +64,20 @@ async def process_video_task(
         try:
             # Progress callback
             async def update_progress(
-                percent: int, message: str, status: str = "processing"
+                percent: int,
+                message: str,
+                status: str = "processing",
+                metadata: dict | None = None,
             ):
-                await progress.update(percent, message, status)
+                job_try = int(ctx.get("job_try", 1))
+                max_tries = int(getattr(WorkerSettings, "max_tries", 3))
+                payload = {
+                    "retry_count": max(0, job_try - 1),
+                    "max_retries": max_tries,
+                }
+                if metadata:
+                    payload.update(metadata)
+                await progress.update(percent, message, status, payload)
                 logger.info(f"Task {task_id}: {percent}% - {message}")
 
             async def should_cancel() -> bool:
@@ -102,6 +115,32 @@ async def process_video_task(
             try:
                 job_try = int(ctx.get("job_try", 1))
                 max_tries = int(getattr(WorkerSettings, "max_tries", 3))
+                await task_service.task_repo.update_task_runtime_metadata(
+                    db,
+                    task_id,
+                    retry_count=max(0, job_try - 1),
+                    max_retries=max_tries,
+                )
+                if job_try < max_tries:
+                    retry_message = (
+                        f"{e}. Retrying attempt {job_try + 1}/{max_tries}..."
+                    )
+                    await task_service.task_repo.update_task_status(
+                        db,
+                        task_id,
+                        "retrying",
+                        progress=0,
+                        progress_message=retry_message,
+                    )
+                    await progress.update(
+                        0,
+                        retry_message,
+                        "retrying",
+                        {
+                            "retry_count": job_try,
+                            "max_retries": max_tries,
+                        },
+                    )
                 if job_try >= max_tries:
                     payload = {
                         "task_id": task_id,
@@ -117,6 +156,19 @@ async def process_video_task(
                 logger.exception("Failed to persist dead-letter payload")
             # Error will be caught by arq and task status will be updated
             raise
+
+
+async def cleanup_temp_files(ctx: Dict[str, Any]) -> Dict[str, int]:
+    """Cron job: remove old unreferenced files from TEMP_DIR."""
+    from ..database import AsyncSessionLocal
+    from ..services.temp_cleanup_service import TempCleanupService
+    from ..config import get_config
+
+    async with AsyncSessionLocal() as db:
+        result = await TempCleanupService(get_config()).cleanup(db)
+        logger.info("Temp cleanup result: %s", result)
+        return result
+
 
 # Worker configuration for arq
 class WorkerSettings:
@@ -142,4 +194,4 @@ class WorkerSettings:
 
     # Worker pool settings
     max_jobs = config.worker_max_jobs
-    cron_jobs = []
+    cron_jobs = [cron(cleanup_temp_files, hour=3, minute=0)]
