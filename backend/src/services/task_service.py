@@ -156,6 +156,97 @@ class TaskService:
         value = artifact.get("file_path")
         return value if isinstance(value, str) and value else None
 
+    @staticmethod
+    def _artifact_json(artifact: Optional[Dict[str, Any]]) -> Any:
+        if not artifact:
+            return None
+        return artifact.get("json_value")
+
+    @staticmethod
+    def validate_candidate_segments(
+        candidates: Any,
+        allowed_candidates: Optional[list[Dict[str, Any]]] = None,
+    ) -> list[Dict[str, Any]]:
+        """Normalize edited render candidates before saving or rendering."""
+        if not isinstance(candidates, list):
+            raise ValueError("edited_candidates must be an array")
+
+        allowed_by_order = {}
+        if allowed_candidates:
+            allowed_by_order = {
+                index + 1: candidate
+                for index, candidate in enumerate(allowed_candidates)
+                if isinstance(candidate, dict)
+            }
+
+        normalized: list[Dict[str, Any]] = []
+        seen_orders: set[int] = set()
+        for index, candidate in enumerate(candidates, start=1):
+            if not isinstance(candidate, dict):
+                raise ValueError("Each edited candidate must be an object")
+
+            raw_order = candidate.get("candidate_order") or index
+            try:
+                candidate_order = int(raw_order)
+            except (TypeError, ValueError):
+                raise ValueError("candidate_order must be a number")
+            if candidate_order <= 0 or candidate_order in seen_orders:
+                raise ValueError("candidate_order must be unique and positive")
+            seen_orders.add(candidate_order)
+
+            base = allowed_by_order.get(candidate_order, {})
+            start_time = str(candidate.get("start_time") or base.get("start_time") or "").strip()
+            end_time = str(candidate.get("end_time") or base.get("end_time") or "").strip()
+            if not start_time or not end_time:
+                raise ValueError("Edited candidates need start_time and end_time")
+
+            start_seconds = parse_timestamp_to_seconds(start_time)
+            end_seconds = parse_timestamp_to_seconds(end_time)
+            if end_seconds <= start_seconds:
+                raise ValueError(
+                    f"Candidate {candidate_order} end_time must be after start_time"
+                )
+            if end_seconds - start_seconds < 3:
+                raise ValueError(
+                    f"Candidate {candidate_order} must be at least 3 seconds long"
+                )
+
+            normalized.append(
+                {
+                    **base,
+                    "candidate_order": candidate_order,
+                    "start_time": start_time,
+                    "end_time": end_time,
+                    "text": str(candidate.get("text") or base.get("text") or "").strip(),
+                    "reasoning": str(
+                        candidate.get("reasoning") or base.get("reasoning") or ""
+                    ).strip(),
+                    "relevance_score": candidate.get(
+                        "relevance_score", base.get("relevance_score", 0.0)
+                    ),
+                    "virality_score": candidate.get(
+                        "virality_score", base.get("virality_score", 0)
+                    ),
+                    "hook_score": candidate.get("hook_score", base.get("hook_score", 0)),
+                    "engagement_score": candidate.get(
+                        "engagement_score", base.get("engagement_score", 0)
+                    ),
+                    "value_score": candidate.get(
+                        "value_score", base.get("value_score", 0)
+                    ),
+                    "shareability_score": candidate.get(
+                        "shareability_score", base.get("shareability_score", 0)
+                    ),
+                    "hook_type": candidate.get("hook_type", base.get("hook_type")),
+                }
+            )
+
+        if not normalized:
+            raise ValueError("Select at least one candidate to render")
+
+        normalized.sort(key=lambda item: int(item["candidate_order"]))
+        return normalized
+
     async def create_task_with_source(
         self,
         user_id: str,
@@ -224,6 +315,9 @@ class TaskService:
         should_cancel: Optional[Callable] = None,
         clip_ready_callback: Optional[Callable] = None,
         cleanup_settings: Optional[Dict[str, Any]] = None,
+        render_candidates: bool = False,
+        selected_candidate_orders: Optional[list[int]] = None,
+        edited_candidate_segments: Optional[list[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         """
         Process a task: download video, analyze, create clips.
@@ -255,6 +349,7 @@ class TaskService:
                 self._artifact_text(artifacts.get("analysis"))
                 or (cache_entry.get("analysis_json") if cache_entry else None)
             )
+            saved_render_segments = self._artifact_json(artifacts.get("render_segments"))
             cache_hit = bool(
                 cache_entry
                 and cache_entry.get("transcript_text")
@@ -398,6 +493,75 @@ class TaskService:
                 transcript_text=result.get("transcript"),
                 analysis_json=result.get("analysis_json"),
             )
+
+            if not render_candidates:
+                await self.task_repo.update_task_status(
+                    self.db,
+                    task_id,
+                    "analysis_ready",
+                    progress=70,
+                    progress_message="Review clip candidates before rendering",
+                    current_stage="analyze",
+                    failed_stage="",
+                    resume_from_stage="render",
+                    stage_progress_json=self._stage_progress_payload("analyze", 70),
+                )
+                if progress_callback:
+                    await progress_callback(
+                        70,
+                        "Review clip candidates before rendering",
+                        "analysis_ready",
+                        {
+                            "current_stage": "analyze",
+                            "resume_from_stage": "render",
+                            "stages": self.stage_progress_dict("analyze", 70),
+                        },
+                    )
+
+                return {
+                    "task_id": task_id,
+                    "status": "analysis_ready",
+                    "candidates_count": len(segments_to_render),
+                    "segments": result["segments"],
+                    "summary": result.get("summary"),
+                    "key_topics": result.get("key_topics"),
+                }
+
+            if edited_candidate_segments is not None:
+                segments_to_render = self.validate_candidate_segments(
+                    edited_candidate_segments,
+                    segments_to_render,
+                )
+                await self.artifact_repo.upsert_artifact(
+                    self.db,
+                    task_id,
+                    "render_segments",
+                    json_value=segments_to_render,
+                )
+            elif render_candidates and isinstance(saved_render_segments, list):
+                segments_to_render = self.validate_candidate_segments(
+                    saved_render_segments,
+                    segments_to_render,
+                )
+
+            selected_orders = {
+                int(order)
+                for order in (selected_candidate_orders or [])
+                if isinstance(order, int) and order > 0
+            }
+            if selected_orders:
+                filtered_segments = []
+                for index, segment in enumerate(segments_to_render, start=1):
+                    raw_order = segment.get("candidate_order", index)
+                    try:
+                        candidate_order = int(raw_order)
+                    except (TypeError, ValueError):
+                        candidate_order = index
+                    if candidate_order in selected_orders:
+                        filtered_segments.append(segment)
+                segments_to_render = filtered_segments
+                if not segments_to_render:
+                    raise ValueError("No selected clip candidates are available to render.")
 
             video_path = Path(result["video_path"])
             total_clips = len(segments_to_render)
@@ -621,6 +785,20 @@ class TaskService:
             for clip in clips
         ]
         task["clips_count"] = len(clips)
+        artifacts = await self.artifact_repo.get_artifacts_by_task(self.db, task_id)
+        segments_artifact = artifacts.get("segments")
+        candidate_payload = segments_artifact.get("json_value") if segments_artifact else None
+        if isinstance(candidate_payload, list):
+            task["clip_candidates"] = [
+                {
+                    **candidate,
+                    "candidate_order": index + 1,
+                }
+                for index, candidate in enumerate(candidate_payload)
+                if isinstance(candidate, dict)
+            ]
+        else:
+            task["clip_candidates"] = []
         task.update(await self._load_task_source_settings(task_id))
         task["resume_action_label"] = self.resume_action_label(task)
         task["stages"] = self._task_stages_for_response(task)

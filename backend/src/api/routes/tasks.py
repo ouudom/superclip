@@ -381,6 +381,38 @@ async def get_task_clips(
         raise HTTPException(status_code=500, detail=f"Error retrieving clips: {str(e)}")
 
 
+@router.get("/{task_id}/source-file")
+async def get_task_source_file(
+    task_id: str, request: Request, db: AsyncSession = Depends(get_db)
+):
+    """Serve downloaded source video for candidate review."""
+    try:
+        task_service = TaskService(db)
+        await _require_task_owner(request, task_service, db, task_id)
+        artifacts = await task_service.artifact_repo.get_artifacts_by_task(db, task_id)
+        video_artifact = artifacts.get("video_path") or {}
+        video_path = video_artifact.get("file_path")
+        if not video_path:
+            raise HTTPException(status_code=404, detail="Source video is not available yet")
+
+        source_path = Path(video_path)
+        if not source_path.exists():
+            raise HTTPException(status_code=404, detail="Source video file not found")
+
+        return FileResponse(
+            path=str(source_path),
+            media_type="video/mp4",
+            filename=source_path.name,
+            content_disposition_type="inline",
+            headers={"Cache-Control": "private, no-store"},
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error serving task source file: {e}")
+        raise HTTPException(status_code=500, detail=f"Error serving source file: {str(e)}")
+
+
 @router.get("/{task_id}/progress")
 async def get_task_progress_sse(task_id: str, request: Request):
     """
@@ -408,7 +440,7 @@ async def get_task_progress_sse(task_id: str, request: Request):
         }
 
         # If task is already completed or error, close connection
-        if task.get("status") in ["completed", "error", "cancelled"]:
+        if task.get("status") in ["completed", "analysis_ready", "error", "cancelled"]:
             yield {"event": "close", "data": json.dumps({"status": task.get("status")})}
             return
 
@@ -430,7 +462,7 @@ async def get_task_progress_sse(task_id: str, request: Request):
                 yield {"event": event_type, "data": json.dumps(progress_data)}
 
                 # Close connection if task is done
-                if progress_data.get("status") in ["completed", "error", "cancelled"]:
+                if progress_data.get("status") in ["completed", "analysis_ready", "error", "cancelled"]:
                     yield {
                         "event": "close",
                         "data": json.dumps({"status": progress_data.get("status")}),
@@ -872,6 +904,125 @@ async def get_performance_metrics(
         raise HTTPException(status_code=500, detail=f"Error loading metrics: {str(e)}")
 
 
+@router.post("/{task_id}/render")
+async def render_task_candidates(
+    task_id: str, request: Request, db: AsyncSession = Depends(get_db)
+):
+    """Render selected clip candidates after analysis review."""
+    try:
+        task_service = TaskService(db)
+        task = await _require_task_owner(request, task_service, db, task_id)
+
+        if task.get("status") not in ["analysis_ready", "error", "cancelled"]:
+            raise HTTPException(
+                status_code=400,
+                detail="Only analysis-ready, errored, or cancelled tasks can render candidates",
+            )
+
+        payload = await request.json()
+        selected_candidate_orders = payload.get("candidate_orders") or []
+        if not isinstance(selected_candidate_orders, list):
+            raise HTTPException(status_code=400, detail="candidate_orders must be an array")
+        selected_candidate_orders = [
+            int(order)
+            for order in selected_candidate_orders
+            if isinstance(order, int) or (isinstance(order, str) and order.isdigit())
+        ]
+        edited_candidates = payload.get("edited_candidates")
+        if edited_candidates is not None:
+            artifacts = await task_service.artifact_repo.get_artifacts_by_task(db, task_id)
+            segments_artifact = artifacts.get("segments")
+            existing_candidates = (
+                segments_artifact.get("json_value")
+                if isinstance(segments_artifact, dict)
+                else None
+            )
+            edited_candidates = task_service.validate_candidate_segments(
+                edited_candidates,
+                existing_candidates if isinstance(existing_candidates, list) else None,
+            )
+            selected_candidate_orders = [
+                int(candidate["candidate_order"]) for candidate in edited_candidates
+            ]
+            await task_service.artifact_repo.upsert_artifact(
+                db,
+                task_id,
+                "render_segments",
+                json_value=edited_candidates,
+            )
+
+        source_url = task.get("source_url")
+        source_type = task.get("source_type")
+        output_format = "vertical"
+        add_subtitles = True
+
+        metadata = await _load_task_source_metadata(task_id)
+        if not source_url:
+            source_url = metadata.get("url")
+        if not source_type:
+            source_type = metadata.get("source_type")
+        of = metadata.get("output_format", output_format)
+        if of in VALID_OUTPUT_FORMATS:
+            output_format = of
+        asub = metadata.get("add_subtitles", add_subtitles)
+        if isinstance(asub, bool):
+            add_subtitles = asub
+        cleanup_settings = normalize_clip_cleanup_settings(
+            metadata.get("cut_long_pauses"),
+            metadata.get("pause_threshold_ms"),
+            metadata.get("remove_filler_words"),
+            metadata.get("filtered_words"),
+        )
+
+        if not source_url or not source_type:
+            raise HTTPException(status_code=400, detail="Task source URL is missing")
+
+        await task_service.task_repo.update_task_status(
+            db,
+            task_id,
+            "queued",
+            progress=70,
+            progress_message="Queued for rendering",
+            current_stage="render",
+            failed_stage="",
+            resume_from_stage="",
+            stage_progress_json=TaskService._stage_progress_payload("render", 70),
+        )
+
+        runtime_config = get_config()
+        processing_mode = (
+            task.get("processing_mode") or runtime_config.default_processing_mode
+        )
+        resume_should_render = task.get("resume_from_stage") == "render"
+
+        job_id = await JobQueue.enqueue_processing_job(
+            "process_video_task",
+            processing_mode,
+            task_id,
+            source_url,
+            source_type,
+            task["user_id"],
+            task.get("font_family") or "THEBOLDFONT",
+            task.get("font_size") or 24,
+            task.get("font_color") or "#FFFFFF",
+            task.get("caption_template") or "default",
+            processing_mode,
+            output_format,
+            add_subtitles,
+            cleanup_settings,
+            True,
+            selected_candidate_orders,
+            edited_candidates,
+        )
+
+        return {"message": "Rendering queued", "job_id": job_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error rendering task candidates: {e}")
+        raise HTTPException(status_code=500, detail=f"Error rendering candidates: {str(e)}")
+
+
 @router.post("/{task_id}/resume")
 async def resume_task(
     task_id: str, request: Request, db: AsyncSession = Depends(get_db)
@@ -946,6 +1097,7 @@ async def resume_task(
         processing_mode = (
             task.get("processing_mode") or runtime_config.default_processing_mode
         )
+        resume_should_render = task.get("resume_from_stage") == "render"
 
         job_id = await JobQueue.enqueue_processing_job(
             "process_video_task",
@@ -962,6 +1114,8 @@ async def resume_task(
             output_format,
             add_subtitles,
             cleanup_settings,
+            resume_should_render,
+            None,
         )
 
         return {"message": "Task resumed", "job_id": job_id}

@@ -8,7 +8,9 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -51,6 +53,7 @@ import {
   Settings2,
   Type,
   Clapperboard,
+  Play,
 } from "lucide-react";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@/components/ui/tooltip";
 import { Progress } from "@/components/ui/progress";
@@ -79,6 +82,26 @@ interface Clip {
   hook_type: string | null;
 }
 
+interface ClipCandidate {
+  candidate_order: number;
+  start_time: string;
+  end_time: string;
+  text?: string;
+  relevance_score?: number;
+  reasoning?: string;
+  virality_score?: number;
+  hook_score?: number;
+  engagement_score?: number;
+  value_score?: number;
+  shareability_score?: number;
+  hook_type?: string | null;
+}
+
+type EditableClipCandidate = ClipCandidate & {
+  text: string;
+  reasoning: string;
+};
+
 interface TaskDetails {
   id: string;
   user_id: string;
@@ -102,6 +125,7 @@ interface TaskDetails {
   resume_action_label?: string;
   last_error_at?: string | null;
   clips_count: number;
+  clip_candidates?: ClipCandidate[];
   created_at: string;
   updated_at: string;
   font_family?: string;
@@ -355,6 +379,10 @@ export default function TaskPage() {
   const [progress, setProgress] = useState(0);
   const [progressMessage, setProgressMessage] = useState("");
   const [isResuming, setIsResuming] = useState(false);
+  const [isRenderingCandidates, setIsRenderingCandidates] = useState(false);
+  const [selectedCandidateOrders, setSelectedCandidateOrders] = useState<number[]>([]);
+  const [candidateDrafts, setCandidateDrafts] = useState<Record<number, EditableClipCandidate>>({});
+  const [previewStartSeconds, setPreviewStartSeconds] = useState(0);
   const [isEditing, setIsEditing] = useState(false);
   const [editedTitle, setEditedTitle] = useState("");
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
@@ -405,6 +433,14 @@ export default function TaskPage() {
   const taskApiUrl = "/api/tasks";
   const getClipUrl = (videoUrl: string) =>
     videoUrl.startsWith("/api/") ? videoUrl : `/api${videoUrl}`;
+  const getSourcePreviewUrl = () => `${taskApiUrl}/${params.id}/source-file#t=${Math.max(0, previewStartSeconds)}`;
+  const parseTimestampToSeconds = (timestamp: string) => {
+    const parts = timestamp.split(":").map((part) => Number(part));
+    if (parts.some((part) => !Number.isFinite(part))) return 0;
+    if (parts.length === 2) return parts[0] * 60 + parts[1];
+    if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+    return Number(timestamp) || 0;
+  };
 
   const buildSupportError = useCallback(async (response: Response, fallbackMessage: string) => {
     const parsed = await parseApiError(response, fallbackMessage);
@@ -462,9 +498,29 @@ export default function TaskPage() {
         setProjectPauseThresholdMs(String(taskData.pause_threshold_ms || 900));
         setProjectRemoveFillerWords(Boolean(taskData.remove_filler_words));
         setProjectFilteredWords((taskData.filtered_words || []).join(", "));
+        if (taskData.status === "analysis_ready") {
+          const candidateOrders = (taskData.clip_candidates || [])
+            .map((candidate: ClipCandidate) => candidate.candidate_order)
+            .filter((order: number) => Number.isFinite(order));
+          setSelectedCandidateOrders((current) => (current.length > 0 ? current : candidateOrders));
+          setCandidateDrafts((current) => {
+            if (Object.keys(current).length > 0) return current;
+            return (taskData.clip_candidates || []).reduce(
+              (drafts: Record<number, EditableClipCandidate>, candidate: ClipCandidate) => {
+                drafts[candidate.candidate_order] = {
+                  ...candidate,
+                  text: candidate.text || "",
+                  reasoning: candidate.reasoning || "",
+                };
+                return drafts;
+              },
+              {},
+            );
+          });
+        }
 
         // Fetch clips for active/completed/error states so partial clips stay visible.
-        if (["completed", "processing", "retrying", "error", "cancelled"].includes(taskData.status)) {
+        if (["completed", "processing", "retrying", "analysis_ready", "error", "cancelled"].includes(taskData.status)) {
           const clipsResponse = await fetch(`${taskApiUrl}/${params.id}/clips`, {
             cache: "no-store",
           });
@@ -590,7 +646,7 @@ export default function TaskPage() {
 
       if (data.status === "completed") {
         void fetchTaskStatus().then(() => triggerAutoRefresh());
-      } else if (data.status === "error" || data.status === "cancelled") {
+      } else if (data.status === "analysis_ready" || data.status === "error" || data.status === "cancelled") {
         void fetchTaskStatus();
       }
     });
@@ -625,7 +681,7 @@ export default function TaskPage() {
 
         if (data.status === "completed") {
           void fetchTaskStatus().then(() => triggerAutoRefresh());
-        } else if (data.status === "error" || data.status === "cancelled") {
+        } else if (data.status === "analysis_ready" || data.status === "error" || data.status === "cancelled") {
           void fetchTaskStatus();
         }
       }
@@ -979,6 +1035,102 @@ export default function TaskPage() {
     }
   };
 
+  const handleToggleCandidate = (candidateOrder: number) => {
+    setSelectedCandidateOrders((current) => {
+      if (current.includes(candidateOrder)) {
+        return current.filter((order) => order !== candidateOrder);
+      }
+      return [...current, candidateOrder].sort((a, b) => a - b);
+    });
+  };
+
+  const handleToggleAllCandidates = () => {
+    const candidateOrders = (task?.clip_candidates || []).map((candidate) => candidate.candidate_order);
+    setSelectedCandidateOrders((current) =>
+      current.length === candidateOrders.length ? [] : candidateOrders,
+    );
+  };
+
+  const handleUpdateCandidateDraft = (
+    candidateOrder: number,
+    field: keyof Pick<EditableClipCandidate, "start_time" | "end_time" | "text" | "reasoning">,
+    value: string,
+  ) => {
+    setCandidateDrafts((current) => {
+      const existing = current[candidateOrder];
+      if (!existing) return current;
+      return {
+        ...current,
+        [candidateOrder]: {
+          ...existing,
+          [field]: value,
+        },
+      };
+    });
+  };
+
+  const buildEditedCandidatesPayload = () =>
+    selectedCandidateOrders
+      .map((order) => candidateDrafts[order])
+      .filter(Boolean)
+      .map((candidate) => ({
+        candidate_order: candidate.candidate_order,
+        start_time: candidate.start_time,
+        end_time: candidate.end_time,
+        text: candidate.text,
+        reasoning: candidate.reasoning,
+        relevance_score: candidate.relevance_score,
+        virality_score: candidate.virality_score,
+        hook_score: candidate.hook_score,
+        engagement_score: candidate.engagement_score,
+        value_score: candidate.value_score,
+        shareability_score: candidate.shareability_score,
+        hook_type: candidate.hook_type,
+      }));
+
+  const handleRenderCandidates = async () => {
+    if (!task?.id || selectedCandidateOrders.length === 0) return;
+    const editedCandidates = buildEditedCandidatesPayload();
+    if (editedCandidates.length === 0) return;
+
+    setIsRenderingCandidates(true);
+    setActionError(null);
+    try {
+      const response = await fetch(`${taskApiUrl}/${task.id}/render`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          candidate_orders: selectedCandidateOrders,
+          edited_candidates: editedCandidates,
+        }),
+      });
+      if (!response.ok) {
+        throw new Error(await buildSupportError(response, "Failed to render candidates"));
+      }
+      setProgress(70);
+      setProgressMessage("Queued for rendering");
+      setTask((currentTask) =>
+        currentTask
+          ? {
+              ...currentTask,
+              status: "queued",
+              progress: 70,
+              progress_message: "Queued for rendering",
+              current_stage: "render",
+              failed_stage: "",
+            }
+          : currentTask,
+      );
+      await fetchTaskStatus();
+    } catch (renderError) {
+      setActionError(renderError instanceof Error ? renderError.message : "Failed to render candidates");
+    } finally {
+      setIsRenderingCandidates(false);
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="min-h-screen bg-white p-4">
@@ -1062,7 +1214,7 @@ export default function TaskPage() {
                   </div>
                 ) : (
                   <>
-                    <h1 className={`text-2xl font-bold text-black ${task.status === "processing" || task.status === "queued" ? "shimmer" : ""}`}>{task.source_title}</h1>
+                    <h1 className={`text-2xl font-bold text-black ${["processing", "queued", "retrying"].includes(task.status) ? "shimmer" : ""}`}>{task.source_title}</h1>
                     <div className="flex items-center gap-1">
                       <Button
                         size="sm"
@@ -1124,6 +1276,12 @@ export default function TaskPage() {
                   </div>
                 ) : task.status === "queued" ? (
                   <Badge className="bg-yellow-100 text-yellow-800">Queued</Badge>
+                ) : task.status === "retrying" ? (
+                  <Badge className="bg-amber-100 text-amber-800">
+                    Retrying {task.retry_count || 0}/{task.max_retries || 3}
+                  </Badge>
+                ) : task.status === "analysis_ready" ? (
+                  <Badge className="bg-emerald-100 text-emerald-800">Review Candidates</Badge>
                 ) : task.status === "error" ? (
                   <Badge className="bg-red-100 text-red-800">Error</Badge>
                 ) : task.status === "cancelled" ? (
@@ -1141,7 +1299,10 @@ export default function TaskPage() {
                     </Button>
                   </Link>
                 )}
-                {(task.status === "queued" || task.status === "processing") && (
+                {task.dead_letter && (
+                  <Badge className="bg-red-100 text-red-800">Dead Letter</Badge>
+                )}
+                {(["queued", "processing", "retrying"].includes(task.status)) && (
                   <Button
                     size="sm"
                     variant="outline"
@@ -1163,7 +1324,7 @@ export default function TaskPage() {
                     disabled={isResuming}
                   >
                     <RefreshCw className={`w-4 h-4 ${isResuming ? "animate-spin" : ""}`} />
-                    {isResuming ? "Resuming" : "Resume"}
+                    {isResuming ? "Resuming" : task.resume_action_label || "Resume"}
                   </Button>
                 )}
               </div>
@@ -1181,7 +1342,7 @@ export default function TaskPage() {
           </Alert>
         )}
 
-        {task?.status === "processing" || task?.status === "queued" ? (
+        {task?.status === "processing" || task?.status === "queued" || task?.status === "retrying" ? (
           <div className="space-y-8">
             {/* Progress indicator */}
             <div className="flex flex-col items-center py-8">
@@ -1197,7 +1358,7 @@ export default function TaskPage() {
 
               {/* Status message */}
               <p className="shimmer text-neutral-600/60 text-sm tracking-wide mb-8">
-                {progressMessage || (task.status === "queued" ? "Waiting in queue" : "Processing")}
+                {progressMessage || (task.status === "queued" ? "Waiting in queue" : task.status === "retrying" ? "Waiting to retry" : "Processing")}
               </p>
 
               {/* Minimal progress bar */}
@@ -1286,6 +1447,196 @@ export default function TaskPage() {
               <span className="w-2 h-2 bg-neutral-300 rounded-full animate-[pulse_1.4s_ease-in-out_0.4s_infinite]" />
             </div>
           </div>
+        ) : task?.status === "analysis_ready" ? (
+          <div className="space-y-6">
+            <div className="flex flex-col gap-4 border-b border-stone-200 pb-5 md:flex-row md:items-center md:justify-between">
+              <div>
+                <h2 className="text-xl font-semibold text-stone-950">Clip Candidates</h2>
+                <p className="mt-1 text-sm text-stone-500">
+                  Select, preview, and adjust cuts before rendering.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button variant="outline" onClick={handleToggleAllCandidates}>
+                  {selectedCandidateOrders.length === (task.clip_candidates || []).length ? "Clear All" : "Select All"}
+                </Button>
+                <Button
+                  onClick={handleRenderCandidates}
+                  disabled={selectedCandidateOrders.length === 0 || isRenderingCandidates}
+                >
+                  <Clapperboard className="h-4 w-4" />
+                  {isRenderingCandidates ? "Queueing" : `Render ${selectedCandidateOrders.length}`}
+                </Button>
+              </div>
+            </div>
+
+            <ProcessingStageList
+              stages={processingStages}
+              currentMessage={task.progress_message || "Analysis complete"}
+              clipsReady={clips.length}
+            />
+
+            {(task.clip_candidates || []).length > 0 && (
+              <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+                <div className="rounded-lg border border-stone-200 bg-white p-4">
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <div>
+                      <h3 className="text-sm font-semibold text-stone-950">Source Preview</h3>
+                      <p className="mt-1 text-xs text-stone-500">
+                        Preview starts at {formatDuration(previewStartSeconds)}.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="overflow-hidden rounded-md bg-black">
+                    <video
+                      key={previewStartSeconds}
+                      controls
+                      preload="metadata"
+                      className="h-[360px] w-full object-contain"
+                    >
+                      <source src={getSourcePreviewUrl()} type="video/mp4" />
+                    </video>
+                  </div>
+                </div>
+                <div className="rounded-lg border border-stone-200 bg-stone-50 p-4">
+                  <h3 className="text-sm font-semibold text-stone-950">Render Queue</h3>
+                  <p className="mt-2 text-sm text-stone-600">
+                    {selectedCandidateOrders.length} selected from {(task.clip_candidates || []).length} candidates.
+                  </p>
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    {selectedCandidateOrders.map((order) => (
+                      <Badge key={order} variant="outline" className="bg-white">
+                        {order}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {(task.clip_candidates || []).length === 0 ? (
+              <Card>
+                <CardContent className="p-8 text-center">
+                  <AlertCircle className="mx-auto mb-3 h-10 w-10 text-yellow-600" />
+                  <h3 className="mb-2 text-lg font-semibold text-stone-950">No candidates found</h3>
+                  <p className="text-sm text-stone-600">Try another video or adjust analysis settings later.</p>
+                </CardContent>
+              </Card>
+            ) : (
+              <div className="grid gap-4">
+                {(task.clip_candidates || []).map((candidate) => {
+                  const selected = selectedCandidateOrders.includes(candidate.candidate_order);
+                  const draft = candidateDrafts[candidate.candidate_order] || {
+                    ...candidate,
+                    text: candidate.text || "",
+                    reasoning: candidate.reasoning || "",
+                  };
+                  return (
+                    <Card key={candidate.candidate_order} className={selected ? "border-stone-900" : ""}>
+                      <CardContent className="p-5">
+                        <div className="flex items-start gap-4">
+                          <Checkbox
+                            checked={selected}
+                            onCheckedChange={() => handleToggleCandidate(candidate.candidate_order)}
+                            aria-label={`Select candidate ${candidate.candidate_order}`}
+                            className="mt-1"
+                          />
+                          <div className="min-w-0 flex-1">
+                            <div className="mb-2 flex flex-wrap items-center gap-2">
+                              <h3 className="font-semibold text-stone-950">Candidate {candidate.candidate_order}</h3>
+                              <Badge variant="outline">
+                                {draft.start_time} - {draft.end_time}
+                              </Badge>
+                              {typeof candidate.virality_score === "number" && candidate.virality_score > 0 && (
+                                <Badge className={`${getViralityBgColor(candidate.virality_score)} text-white`}>
+                                  <Zap className="mr-1 h-3 w-3" />
+                                  {candidate.virality_score}
+                                </Badge>
+                              )}
+                              {typeof candidate.relevance_score === "number" && (
+                                <Badge className={getScoreColor(candidate.relevance_score)}>
+                                  <Star className="mr-1 h-3 w-3" />
+                                  {(candidate.relevance_score * 100).toFixed(0)}%
+                                </Badge>
+                              )}
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => setPreviewStartSeconds(parseTimestampToSeconds(draft.start_time))}
+                              >
+                                <Play className="h-4 w-4" />
+                                Preview
+                              </Button>
+                            </div>
+                            <div className="mb-3 grid gap-3 sm:grid-cols-2">
+                              <label className="text-xs font-medium text-stone-600">
+                                Start
+                                <Input
+                                  value={draft.start_time}
+                                  onChange={(event) =>
+                                    handleUpdateCandidateDraft(
+                                      candidate.candidate_order,
+                                      "start_time",
+                                      event.target.value,
+                                    )
+                                  }
+                                  className="mt-1"
+                                  placeholder="00:10"
+                                />
+                              </label>
+                              <label className="text-xs font-medium text-stone-600">
+                                End
+                                <Input
+                                  value={draft.end_time}
+                                  onChange={(event) =>
+                                    handleUpdateCandidateDraft(
+                                      candidate.candidate_order,
+                                      "end_time",
+                                      event.target.value,
+                                    )
+                                  }
+                                  className="mt-1"
+                                  placeholder="00:42"
+                                />
+                              </label>
+                            </div>
+                            <label className="mb-3 block text-xs font-medium text-stone-600">
+                              Transcript
+                              <Textarea
+                                value={draft.text}
+                                onChange={(event) =>
+                                  handleUpdateCandidateDraft(
+                                    candidate.candidate_order,
+                                    "text",
+                                    event.target.value,
+                                  )
+                                }
+                                className="mt-1 min-h-24 resize-y text-sm leading-6"
+                              />
+                            </label>
+                            <label className="block text-xs font-medium text-stone-600">
+                              Reason
+                              <Textarea
+                                value={draft.reasoning}
+                                onChange={(event) =>
+                                  handleUpdateCandidateDraft(
+                                    candidate.candidate_order,
+                                    "reasoning",
+                                    event.target.value,
+                                  )
+                                }
+                                className="mt-1 min-h-20 resize-y text-sm leading-6"
+                              />
+                            </label>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         ) : task?.status === "error" || task?.status === "cancelled" ? (
           <div className="space-y-6">
             <Card>
@@ -1330,7 +1681,9 @@ export default function TaskPage() {
                       disabled={isResuming}
                     >
                       <RefreshCw className={`h-4 w-4 ${isResuming ? "animate-spin" : ""}`} />
-                      {isResuming ? "Resuming" : task.status === "error" ? "Retry" : "Resume"}
+                      {isResuming
+                        ? "Resuming"
+                        : task.resume_action_label || (task.status === "error" ? "Retry" : "Resume")}
                     </Button>
                     <Link href="/">
                       <Button variant="outline">
@@ -1348,6 +1701,17 @@ export default function TaskPage() {
               currentMessage={getTaskFailureMessage(task)}
               clipsReady={clips.length}
             />
+
+            {task.dead_letter && (
+              <Alert className="border-red-200 bg-red-50 text-red-900">
+                <AlertCircle className="h-4 w-4" />
+                <AlertDescription>
+                  Worker exhausted retries
+                  {task.dead_letter_payload?.tries ? ` (${task.dead_letter_payload.tries} attempts)` : ""}.
+                  {task.dead_letter_payload?.error ? ` ${task.dead_letter_payload.error}` : ""}
+                </AlertDescription>
+              </Alert>
+            )}
 
             {clips.length > 0 && (
               <div className="grid gap-6">
