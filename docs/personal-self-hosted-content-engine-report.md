@@ -268,6 +268,7 @@ Done when:
 Goal:
 
 - Clean DB around personal content engine.
+- Implementation artifact: [Phase 2 Schema Simplification](./phase-2-schema-simplification.md).
 
 Build:
 

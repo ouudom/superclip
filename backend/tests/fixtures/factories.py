@@ -12,8 +12,6 @@ async def create_user(
     email: str | None = None,
     name: str = "Test User",
     is_admin: bool = False,
-    plan: str = "free",
-    subscription_status: str = "inactive",
 ):
     user_id = user_id or str(uuid4())
     email = email or f"{user_id}@example.com"
@@ -27,10 +25,10 @@ async def create_user(
             """
             INSERT INTO users (
                 id, name, email, "emailVerified", "createdAt", "updatedAt",
-                is_admin, plan, subscription_status
+                is_admin
             ) VALUES (
                 :id, :name, :email, false, :created_at, :updated_at,
-                :is_admin, :plan, :subscription_status
+                :is_admin
             )
             """
         ),
@@ -41,8 +39,6 @@ async def create_user(
             "created_at": now,
             "updated_at": now,
             "is_admin": is_admin,
-            "plan": plan,
-            "subscription_status": subscription_status,
         },
     )
     await session.commit()

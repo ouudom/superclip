@@ -101,7 +101,6 @@ export default async function AdminPage({
         email: true,
         name: true,
         is_admin: true,
-        plan: true,
         createdAt: true,
       },
     }),
@@ -326,7 +325,6 @@ export default async function AdminPage({
             <thead className="bg-gray-50">
               <tr>
                 <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500">User</th>
-                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500">Plan</th>
                 <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500">Role</th>
                 <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500">Generations</th>
                 <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500">Created</th>
@@ -342,11 +340,6 @@ export default async function AdminPage({
                     <Link href={`/admin?user=${user.id}`} className="text-xs text-black underline">
                       View user tasks
                     </Link>
-                  </td>
-                  <td className="px-4 py-3">
-                    <Badge variant="outline" className="capitalize">
-                      {user.plan}
-                    </Badge>
                   </td>
                   <td className="px-4 py-3">
                     {user.is_admin ? (

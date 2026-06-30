@@ -34,23 +34,18 @@ model User {
   default_font_family String?   @default("TikTokSans-Regular") @db.VarChar(100)
   default_font_size   Int?      @default(24)
   default_font_color  String?   @default("#FFFFFF") @db.VarChar(7)
-  notify_on_completion Boolean  @default(true)
 
-  // Monetization and billing
-  plan                 String    @default("free") @db.VarChar(20)
-  subscription_status  String    @default("inactive") @db.VarChar(20)
   is_admin             Boolean   @default(false)
-  stripe_customer_id   String?   @unique @db.VarChar(255)
-  stripe_subscription_id String? @unique @db.VarChar(255)
-  billing_period_start DateTime? @db.Timestamptz
-  billing_period_end   DateTime? @db.Timestamptz
-  trial_ends_at        DateTime? @db.Timestamptz
 
   // Relationships
   tasks         Task[]
   sessions      Session[]
   accounts      Account[]
-  app_settings  AppSetting[]
+  app_settings   AppSetting[]   @relation("UserAppSettings")
+  owner_settings OwnerSetting[] @relation("UserOwnerSettings")
+  model_profiles ModelProfile[] @relation("UserModelProfiles")
+  prompt_versions PromptVersion[] @relation("UserPromptVersions")
+  workflows      Workflow[]     @relation("UserWorkflows")
 
   @@map("users")
 }
@@ -63,10 +58,85 @@ model AppSetting {
   created_at      DateTime @default(now()) @db.Timestamptz
   updated_at      DateTime @default(now()) @updatedAt @db.Timestamptz
 
-  user            User?    @relation(fields: [updated_by], references: [id], onDelete: SetNull)
+  user            User?    @relation("UserAppSettings", fields: [updated_by], references: [id], onDelete: SetNull)
 
   @@index([updated_by])
   @@map("app_settings")
+}
+
+model OwnerSetting {
+  setting_key String   @id @db.VarChar(100)
+  value_json  String
+  updated_by  String?  @db.VarChar(36)
+  created_at  DateTime @default(now()) @db.Timestamptz
+  updated_at  DateTime @default(now()) @updatedAt @db.Timestamptz
+
+  user        User?    @relation("UserOwnerSettings", fields: [updated_by], references: [id], onDelete: SetNull)
+
+  @@index([updated_by])
+  @@map("owner_settings")
+}
+
+model ModelProfile {
+  id            String   @id @default(uuid())
+  name          String   @unique @db.VarChar(100)
+  provider      String   @db.VarChar(40)
+  model         String   @db.VarChar(160)
+  purpose       String   @db.VarChar(80)
+  is_default    Boolean  @default(false)
+  settings_json String   @default("{}")
+  updated_by    String?  @db.VarChar(36)
+  created_at    DateTime @default(now()) @db.Timestamptz
+  updated_at    DateTime @default(now()) @updatedAt @db.Timestamptz
+
+  user          User?    @relation("UserModelProfiles", fields: [updated_by], references: [id], onDelete: SetNull)
+
+  @@index([purpose])
+  @@index([is_default])
+  @@index([updated_by])
+  @@map("model_profiles")
+}
+
+model PromptVersion {
+  id            String   @id @default(uuid())
+  name          String   @db.VarChar(120)
+  purpose       String   @db.VarChar(80)
+  version       Int      @default(1)
+  prompt_text   String
+  metadata_json String   @default("{}")
+  is_active     Boolean  @default(true)
+  updated_by    String?  @db.VarChar(36)
+  created_at    DateTime @default(now()) @db.Timestamptz
+  updated_at    DateTime @default(now()) @updatedAt @db.Timestamptz
+
+  user          User?    @relation("UserPromptVersions", fields: [updated_by], references: [id], onDelete: SetNull)
+
+  @@unique([name, version])
+  @@index([purpose])
+  @@index([is_active])
+  @@index([updated_by])
+  @@map("prompt_versions")
+}
+
+model Workflow {
+  id            String   @id @default(uuid())
+  name          String   @unique @db.VarChar(120)
+  description   String?
+  source_type   String   @default("youtube") @db.VarChar(40)
+  output_target String   @default("shorts") @db.VarChar(40)
+  config_json   String   @default("{}")
+  is_default    Boolean  @default(false)
+  updated_by    String?  @db.VarChar(36)
+  created_at    DateTime @default(now()) @db.Timestamptz
+  updated_at    DateTime @default(now()) @updatedAt @db.Timestamptz
+
+  user          User?    @relation("UserWorkflows", fields: [updated_by], references: [id], onDelete: SetNull)
+
+  @@index([source_type])
+  @@index([output_target])
+  @@index([is_default])
+  @@index([updated_by])
+  @@map("workflows")
 }
 
 model Task {
@@ -77,7 +147,6 @@ model Task {
   status               String    @default("pending") @db.VarChar(20)
   progress             Int?      @default(0)
   progress_message     String?
-  completion_notification_sent_at DateTime? @db.Timestamptz
 
   // Font customization fields
   font_family          String?   @default("TikTokSans-Regular") @db.VarChar(100)
@@ -158,12 +227,4 @@ model Verification {
   updatedAt  DateTime?
 
   @@map("verification")
-}
-
-model StripeWebhookEvent {
-  id         String   @id
-  type       String
-  created_at DateTime @default(now()) @db.Timestamptz
-
-  @@map("stripe_webhook_events")
 }

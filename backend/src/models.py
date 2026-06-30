@@ -50,33 +50,8 @@ class User(Base):
     last_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     password_hash: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
 
-    # Billing fields
-    notify_on_completion: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, server_default=sql_text("'true'")
-    )
     is_admin: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=sql_text("'false'")
-    )
-    plan: Mapped[str] = mapped_column(
-        String(20), nullable=False, server_default=sql_text("'free'")
-    )
-    subscription_status: Mapped[str] = mapped_column(
-        String(20), nullable=False, server_default=sql_text("'inactive'")
-    )
-    stripe_customer_id: Mapped[Optional[str]] = mapped_column(
-        String(255), nullable=True, unique=True
-    )
-    stripe_subscription_id: Mapped[Optional[str]] = mapped_column(
-        String(255), nullable=True, unique=True
-    )
-    billing_period_start: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    billing_period_end: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    trial_ends_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True), nullable=True
     )
 
     # Relationships
@@ -91,6 +66,113 @@ class AppSetting(Base):
     setting_key: Mapped[str] = mapped_column(String(100), primary_key=True)
     encrypted_value: Mapped[str] = mapped_column(Text, nullable=False)
     prefer_admin_value: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=sql_text("'false'")
+    )
+    updated_by: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class OwnerSetting(Base):
+    __tablename__ = "owner_settings"
+
+    setting_key: Mapped[str] = mapped_column(String(100), primary_key=True)
+    value_json: Mapped[str] = mapped_column(Text, nullable=False)
+    updated_by: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class ModelProfile(Base):
+    __tablename__ = "model_profiles"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=generate_uuid_string
+    )
+    name: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
+    provider: Mapped[str] = mapped_column(String(40), nullable=False)
+    model: Mapped[str] = mapped_column(String(160), nullable=False)
+    purpose: Mapped[str] = mapped_column(String(80), nullable=False)
+    is_default: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=sql_text("'false'")
+    )
+    settings_json: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=sql_text("'{}'")
+    )
+    updated_by: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class PromptVersion(Base):
+    __tablename__ = "prompt_versions"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=generate_uuid_string
+    )
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    purpose: Mapped[str] = mapped_column(String(80), nullable=False)
+    version: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=sql_text("'1'")
+    )
+    prompt_text: Mapped[str] = mapped_column(Text, nullable=False)
+    metadata_json: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=sql_text("'{}'")
+    )
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=sql_text("'true'")
+    )
+    updated_by: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        CheckConstraint("version > 0", name="check_prompt_version_positive"),
+    )
+
+
+class Workflow(Base):
+    __tablename__ = "workflows"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=generate_uuid_string
+    )
+    name: Mapped[str] = mapped_column(String(120), nullable=False, unique=True)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    source_type: Mapped[str] = mapped_column(
+        String(40), nullable=False, server_default=sql_text("'youtube'")
+    )
+    output_target: Mapped[str] = mapped_column(
+        String(40), nullable=False, server_default=sql_text("'shorts'")
+    )
+    config_json: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=sql_text("'{}'")
+    )
+    is_default: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=sql_text("'false'")
     )
     updated_by: Mapped[Optional[str]] = mapped_column(
@@ -159,9 +241,6 @@ class Task(Base):
     )
     error_code: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
     stage_timings_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    completion_notification_sent_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

@@ -20,16 +20,7 @@ CREATE TABLE users (
     default_font_family VARCHAR(100) DEFAULT 'TikTokSans-Regular',
     default_font_size INTEGER DEFAULT 24,
     default_font_color VARCHAR(7) DEFAULT '#FFFFFF',
-    notify_on_completion BOOLEAN NOT NULL DEFAULT true,
-    -- Monetization and billing fields
-    is_admin BOOLEAN NOT NULL DEFAULT false,
-    plan VARCHAR(20) NOT NULL DEFAULT 'free',
-    subscription_status VARCHAR(20) NOT NULL DEFAULT 'inactive',
-    stripe_customer_id VARCHAR(255) UNIQUE,
-    stripe_subscription_id VARCHAR(255) UNIQUE,
-    billing_period_start TIMESTAMP WITH TIME ZONE,
-    billing_period_end TIMESTAMP WITH TIME ZONE,
-    trial_ends_at TIMESTAMP WITH TIME ZONE
+    is_admin BOOLEAN NOT NULL DEFAULT false
 );
 
 -- Source table (created before tasks since tasks reference sources)
@@ -68,7 +59,6 @@ CREATE TABLE tasks (
     cache_hit BOOLEAN NOT NULL DEFAULT false,
     error_code VARCHAR(80),
     stage_timings_json TEXT,
-    completion_notification_sent_at TIMESTAMP WITH TIME ZONE,
 
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
@@ -148,17 +138,58 @@ CREATE TABLE verification (
     "updatedAt" TIMESTAMP WITH TIME ZONE
 );
 
--- Stripe webhook idempotency table
-CREATE TABLE stripe_webhook_events (
-    id VARCHAR(255) PRIMARY KEY,
-    type VARCHAR(255) NOT NULL,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-);
-
 CREATE TABLE app_settings (
     setting_key VARCHAR(100) PRIMARY KEY,
     encrypted_value TEXT NOT NULL,
     prefer_admin_value BOOLEAN NOT NULL DEFAULT false,
+    updated_by VARCHAR(36) REFERENCES users(id) ON DELETE SET NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE owner_settings (
+    setting_key VARCHAR(100) PRIMARY KEY,
+    value_json TEXT NOT NULL,
+    updated_by VARCHAR(36) REFERENCES users(id) ON DELETE SET NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE model_profiles (
+    id VARCHAR(36) PRIMARY KEY DEFAULT uuid_generate_v4()::text,
+    name VARCHAR(100) NOT NULL UNIQUE,
+    provider VARCHAR(40) NOT NULL,
+    model VARCHAR(160) NOT NULL,
+    purpose VARCHAR(80) NOT NULL,
+    is_default BOOLEAN NOT NULL DEFAULT false,
+    settings_json TEXT NOT NULL DEFAULT '{}',
+    updated_by VARCHAR(36) REFERENCES users(id) ON DELETE SET NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE prompt_versions (
+    id VARCHAR(36) PRIMARY KEY DEFAULT uuid_generate_v4()::text,
+    name VARCHAR(120) NOT NULL,
+    purpose VARCHAR(80) NOT NULL,
+    version INTEGER NOT NULL DEFAULT 1 CHECK (version > 0),
+    prompt_text TEXT NOT NULL,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    is_active BOOLEAN NOT NULL DEFAULT true,
+    updated_by VARCHAR(36) REFERENCES users(id) ON DELETE SET NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(name, version)
+);
+
+CREATE TABLE workflows (
+    id VARCHAR(36) PRIMARY KEY DEFAULT uuid_generate_v4()::text,
+    name VARCHAR(120) NOT NULL UNIQUE,
+    description TEXT,
+    source_type VARCHAR(40) NOT NULL DEFAULT 'youtube',
+    output_target VARCHAR(40) NOT NULL DEFAULT 'shorts',
+    config_json TEXT NOT NULL DEFAULT '{}',
+    is_default BOOLEAN NOT NULL DEFAULT false,
     updated_by VARCHAR(36) REFERENCES users(id) ON DELETE SET NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
@@ -194,6 +225,17 @@ CREATE INDEX idx_session_userId ON session("userId");
 CREATE INDEX idx_account_userId ON account("userId");
 CREATE INDEX idx_verification_identifier ON verification(identifier);
 CREATE INDEX idx_app_settings_updated_by ON app_settings(updated_by);
+CREATE INDEX idx_owner_settings_updated_by ON owner_settings(updated_by);
+CREATE INDEX idx_model_profiles_purpose ON model_profiles(purpose);
+CREATE INDEX idx_model_profiles_is_default ON model_profiles(is_default);
+CREATE INDEX idx_model_profiles_updated_by ON model_profiles(updated_by);
+CREATE INDEX idx_prompt_versions_purpose ON prompt_versions(purpose);
+CREATE INDEX idx_prompt_versions_is_active ON prompt_versions(is_active);
+CREATE INDEX idx_prompt_versions_updated_by ON prompt_versions(updated_by);
+CREATE INDEX idx_workflows_source_type ON workflows(source_type);
+CREATE INDEX idx_workflows_output_target ON workflows(output_target);
+CREATE INDEX idx_workflows_is_default ON workflows(is_default);
+CREATE INDEX idx_workflows_updated_by ON workflows(updated_by);
 CREATE INDEX idx_api_keys_user_id ON api_keys(user_id);
 CREATE INDEX idx_api_keys_key_hash ON api_keys(key_hash);
 
@@ -224,6 +266,10 @@ CREATE TRIGGER update_tasks_updated_at BEFORE UPDATE ON tasks FOR EACH ROW EXECU
 CREATE TRIGGER update_sources_updated_at BEFORE UPDATE ON sources FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 CREATE TRIGGER update_generated_clips_updated_at BEFORE UPDATE ON generated_clips FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 CREATE TRIGGER update_app_settings_updated_at BEFORE UPDATE ON app_settings FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE TRIGGER update_owner_settings_updated_at BEFORE UPDATE ON owner_settings FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE TRIGGER update_model_profiles_updated_at BEFORE UPDATE ON model_profiles FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE TRIGGER update_prompt_versions_updated_at BEFORE UPDATE ON prompt_versions FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE TRIGGER update_workflows_updated_at BEFORE UPDATE ON workflows FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 -- Better Auth tables use camelCase "updatedAt"
 CREATE TRIGGER update_session_updatedAt BEFORE UPDATE ON session FOR EACH ROW EXECUTE FUNCTION update_updatedAt_column();
