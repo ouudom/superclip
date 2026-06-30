@@ -30,7 +30,6 @@ from .database import init_db, close_db, get_db, AsyncSessionLocal
 from .auth_headers import get_authenticated_user_id as get_backend_user_id
 from .api.routes.tasks import router as tasks_router
 from .api.routes.feedback import router as feedback_router
-from .api.routes.billing import router as billing_router
 from .services.video_service import VideoService, UPLOAD_URL_PREFIX
 
 config = Config()
@@ -70,7 +69,6 @@ app.add_middleware(
 # Include API routers
 app.include_router(tasks_router)
 app.include_router(feedback_router)
-app.include_router(billing_router)
 
 def _get_authenticated_user_id(request: Request) -> str:
     return get_backend_user_id(request, config)

@@ -4,9 +4,6 @@ import { PrismaClient } from "../generated/prisma";
 import { nextCookies } from "better-auth/next-js";
 
 const prisma = new PrismaClient();
-const disableSignUp = ["1", "true", "yes"].includes(
-  (process.env.DISABLE_SIGN_UP ?? "").toLowerCase()
-);
 
 function toOrigin(value?: string) {
   if (!value) {
@@ -47,7 +44,6 @@ export const auth = betterAuth({
   trustedOrigins,
   emailAndPassword: {
     enabled: true,
-    disableSignUp,
   },
   plugins: [
     nextCookies(), // Enable Next.js cookie handling

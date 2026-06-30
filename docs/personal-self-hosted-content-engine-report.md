@@ -210,6 +210,7 @@ Quality rules:
 Goal:
 
 - Know exact SaaS/shared surface before cutting.
+- Implementation artifact: [Phase 0 Baseline Audit](./phase-0-baseline-audit.md).
 
 Build:
 
@@ -233,6 +234,7 @@ Risk:
 Goal:
 
 - Make app clean for one owner on home server.
+- Implementation artifact: [Phase 1 Personal Mode Stripdown](./phase-1-personal-mode-stripdown.md).
 
 Build:
 

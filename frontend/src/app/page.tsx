@@ -13,14 +13,11 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
 import { signOut, useSession } from "@/lib/auth-client";
-import { formatBillingPlanName, isPaidBillingPlan } from "@/lib/billing-plans";
-import { track } from "@/lib/datafast";
 import { formatSupportMessage, parseApiError } from "@/lib/api-error";
 import Link from "next/link";
 import Image from "next/image";
 import { ArrowRight, Youtube, CheckCircle, AlertCircle, Loader2, Palette, Type, Paintbrush, Film, Sparkles, Upload, Monitor, Menu, X, LogOut, List, Shield, Settings } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
-import LandingPage from "@/components/landing-page";
 import { isLandingOnlyModeEnabled } from "@/lib/app-flags";
 
 interface LatestTask {
@@ -30,18 +27,6 @@ interface LatestTask {
   status: string;
   clips_count: number;
   created_at: string;
-}
-
-interface BillingSummary {
-  monetization_enabled: boolean;
-  plan: string;
-  subscription_status: string;
-  usage_count: number;
-  usage_limit: number | null;
-  remaining: number | null;
-  can_create_task: boolean;
-  upgrade_required: boolean;
-  reason: string | null;
 }
 
 interface FontOption {
@@ -223,7 +208,6 @@ export default function Home() {
   // Latest task state
   const [latestTask, setLatestTask] = useState<LatestTask | null>(null);
   const [isLoadingLatest, setIsLoadingLatest] = useState(false);
-  const [billingSummary, setBillingSummary] = useState<BillingSummary | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
   const taskApiUrl = "/api/tasks";
@@ -353,29 +337,6 @@ export default function Home() {
     fetchLatestTask();
   }, [session?.user?.id, taskApiUrl]);
 
-  useEffect(() => {
-    const fetchBillingSummary = async () => {
-      if (!session?.user?.id) return;
-
-      try {
-        const response = await fetch("/api/tasks/billing-summary", {
-          cache: "no-store",
-        });
-
-        if (!response.ok) {
-          return;
-        }
-
-        const data: BillingSummary = await response.json();
-        setBillingSummary(data);
-      } catch (error) {
-        console.error("Failed to load billing summary:", error);
-      }
-    };
-
-    fetchBillingSummary();
-  }, [session?.user?.id, apiUrl]);
-
   // Always treat file input as uncontrolled, and store file in a ref
   const fileRef = useRef<File | null>(null);
 
@@ -456,14 +417,7 @@ export default function Home() {
     return font.display_name.toLowerCase().includes(keyword) || font.name.toLowerCase().includes(keyword);
   });
 
-  const canUploadCustomFonts =
-    !billingSummary?.monetization_enabled ||
-    (isPaidBillingPlan(billingSummary.plan) && ["active", "trialing"].includes(billingSummary.subscription_status));
-  const generationRequiresUpgrade =
-    Boolean(billingSummary?.monetization_enabled && !billingSummary.can_create_task);
-  const generationGateMessage =
-    billingSummary?.reason || "Choose a paid plan to process videos.";
-  const generationControlsDisabled = isLoading || generationRequiresUpgrade;
+  const generationControlsDisabled = isLoading;
 
   const handleSignOut = async () => {
     await signOut();
@@ -493,11 +447,6 @@ export default function Home() {
     if (sourceType === "upload" && !fileRef.current) return;
     if (sourceType === "youtube" && !url.trim()) return;
     if (!session?.user?.id) return;
-    if (generationRequiresUpgrade) {
-      setError(generationGateMessage);
-      return;
-    }
-
     setIsLoading(true);
     setProgress(0);
     setError(null);
@@ -564,18 +513,6 @@ export default function Home() {
 
       const startResult = await startResponse.json();
       const taskIdFromStart = startResult.task_id;
-      track("task_created", {
-        source_type: sourceType,
-        caption_template: captionTemplate,
-        include_broll: includeBroll,
-        output_format: outputFormat,
-        add_subtitles: addSubtitles,
-        cut_long_pauses: cutLongPauses,
-        pause_threshold_ms: normalizedPauseThreshold,
-        remove_filler_words: removeFillerWords,
-        filtered_words: normalizedFilteredWords,
-        processing_mode: "fast",
-      });
       // Redirect immediately to the task page
       window.location.href = `/tasks/${taskIdFromStart}`;
 
@@ -609,7 +546,33 @@ export default function Home() {
   }
 
   if (isLandingOnlyModeEnabled || !session?.user) {
-    return <LandingPage />;
+    return (
+      <div className="min-h-screen bg-white flex items-center justify-center p-4">
+        <div className="max-w-sm text-center space-y-4">
+          <Image
+            src="/logo.png"
+            alt="SupoClip"
+            width={40}
+            height={40}
+            className="mx-auto rounded-lg"
+          />
+          <div>
+            <h1 className="text-2xl font-bold text-stone-950">SupoClip</h1>
+            <p className="mt-2 text-sm text-stone-500">
+              Personal clipping engine. Sign in to continue.
+            </p>
+          </div>
+          <div className="flex justify-center gap-2">
+            <Link href="/sign-in">
+              <Button>Sign In</Button>
+            </Link>
+            <Link href="/sign-up">
+              <Button variant="outline">Create Account</Button>
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -631,45 +594,6 @@ export default function Home() {
 
             {/* Desktop nav */}
             <div className="hidden md:flex items-center gap-2">
-              {billingSummary?.monetization_enabled && (
-                <div className="flex items-center gap-2 mr-1">
-                  <Badge
-                    className={`text-[10px] px-1.5 py-0 h-5 ${
-                      isPaidBillingPlan(billingSummary.plan) && !billingSummary.upgrade_required
-                        ? "bg-stone-900 text-white"
-                        : "bg-amber-100 text-amber-800 border border-amber-200"
-                    }`}
-                  >
-                    {isPaidBillingPlan(billingSummary.plan) && !billingSummary.upgrade_required
-                      ? formatBillingPlanName(billingSummary.plan)
-                      : "Upgrade required"}
-                  </Badge>
-                  {!billingSummary.upgrade_required && (
-                  <div className="flex items-center gap-1.5">
-                    <div className="w-16 h-1.5 bg-stone-200 rounded-full overflow-hidden">
-                      <div
-                        className={`h-full rounded-full transition-all duration-500 ${
-                          billingSummary.usage_limit &&
-                          billingSummary.usage_count / billingSummary.usage_limit > 0.8
-                            ? "bg-red-500"
-                            : "bg-stone-900"
-                        }`}
-                        style={{
-                          width: billingSummary.usage_limit
-                            ? `${Math.min((billingSummary.usage_count / billingSummary.usage_limit) * 100, 100)}%`
-                            : "0%",
-                        }}
-                      />
-                    </div>
-                    <span className="text-[11px] text-stone-500 tabular-nums whitespace-nowrap">
-                      {billingSummary.usage_limit
-                        ? `${billingSummary.usage_count}/${billingSummary.usage_limit}`
-                        : `${billingSummary.usage_count}`}
-                    </span>
-                  </div>
-                  )}
-                </div>
-              )}
               <Link href="/list">
                 <Button variant="outline" size="sm">
                   All Generations
@@ -701,19 +625,6 @@ export default function Home() {
 
             {/* Mobile hamburger */}
             <div className="flex items-center gap-2 md:hidden">
-              {billingSummary?.monetization_enabled && (
-                <Badge
-                  className={`text-[10px] px-1.5 py-0 h-5 ${
-                    isPaidBillingPlan(billingSummary.plan) && !billingSummary.upgrade_required
-                      ? "bg-stone-900 text-white"
-                      : "bg-amber-100 text-amber-800 border border-amber-200"
-                  }`}
-                >
-                  {isPaidBillingPlan(billingSummary.plan) && !billingSummary.upgrade_required
-                    ? formatBillingPlanName(billingSummary.plan)
-                    : "Upgrade required"}
-                </Badge>
-              )}
               <Button
                 variant="ghost"
                 size="sm"
@@ -750,38 +661,6 @@ export default function Home() {
               </Link>
 
               <Separator />
-
-              {/* Usage bar (mobile) */}
-              {billingSummary?.monetization_enabled && (
-                billingSummary.upgrade_required ? (
-                <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
-                  <p className="text-xs font-medium text-amber-900">Choose a paid plan to process videos.</p>
-                </div>
-                ) : (
-                <div className="flex items-center gap-2 px-3 py-2">
-                  <div className="flex-1 h-1.5 bg-stone-200 rounded-full overflow-hidden">
-                    <div
-                      className={`h-full rounded-full transition-all duration-500 ${
-                        billingSummary.usage_limit &&
-                        billingSummary.usage_count / billingSummary.usage_limit > 0.8
-                          ? "bg-red-500"
-                          : "bg-stone-900"
-                      }`}
-                      style={{
-                        width: billingSummary.usage_limit
-                          ? `${Math.min((billingSummary.usage_count / billingSummary.usage_limit) * 100, 100)}%`
-                          : "0%",
-                      }}
-                    />
-                  </div>
-                  <span className="text-xs text-stone-500 tabular-nums whitespace-nowrap">
-                    {billingSummary.usage_limit
-                      ? `${billingSummary.usage_count}/${billingSummary.usage_limit}`
-                    : `${billingSummary.usage_count}`}
-                  </span>
-                </div>
-                )
-              )}
 
               {/* Nav links */}
               <Link
@@ -892,26 +771,11 @@ export default function Home() {
                 Create New Clip
               </h2>
               <p className="text-stone-500">
-                {generationRequiresUpgrade
-                  ? "Video processing is available on paid plans."
-                  : "Paste a YouTube link or upload a video — AI handles the rest."}
+                Paste a YouTube link or upload a video — AI handles the rest.
               </p>
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-6">
-              {generationRequiresUpgrade && (
-                <Alert className="border-amber-200 bg-amber-50">
-                  <AlertCircle className="h-4 w-4 text-amber-600" />
-                  <AlertDescription className="text-sm text-amber-900">
-                    <span className="font-medium">{generationGateMessage}</span>{" "}
-                    Free accounts can browse SupoClip, but video generation requires a paid plan.
-                    <Link href="/settings" className="ml-1 font-semibold underline underline-offset-2">
-                      Upgrade in settings
-                    </Link>.
-                  </AlertDescription>
-                </Alert>
-              )}
-
               {/* Source Type Tabs */}
               <div className="space-y-3">
                 <div className="flex gap-2">
@@ -1184,15 +1048,12 @@ export default function Home() {
                             type="button"
                             variant="outline"
                             size="sm"
-                            disabled={generationControlsDisabled || isUploadingFont || !canUploadCustomFonts}
+                            disabled={generationControlsDisabled || isUploadingFont}
                             onClick={() => fontUploadInputRef.current?.click()}
                           >
                             {isUploadingFont ? "Uploading..." : "Upload Font"}
                           </Button>
                         </div>
-                        {!canUploadCustomFonts && (
-                          <p className="text-xs text-amber-700">Custom font upload is available on paid plans.</p>
-                        )}
                         <Input
                           type="text"
                           value={fontSearch}
@@ -1358,24 +1219,16 @@ export default function Home() {
                 </Alert>
               )}
 
-              <p className="text-xs text-stone-500">
-                Completion emails use your user preference in{" "}
-                <Link href="/settings" className="font-medium text-stone-700 underline underline-offset-2">
-                  Settings
-                </Link>.
-              </p>
-
               <Button
                 type="submit"
                 className="w-full h-12 text-base rounded-xl"
                 disabled={
                   (sourceType === "youtube" && !url.trim()) ||
                   (sourceType === "upload" && !fileRef.current) ||
-                  generationRequiresUpgrade ||
                   isLoading
                 }
               >
-                {isLoading ? "Processing..." : generationRequiresUpgrade ? "Choose a Paid Plan" : "Process Video"}
+                {isLoading ? "Processing..." : "Process Video"}
               </Button>
             </form>
           </div>

@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { signIn } from "../../lib/auth-client";
-import { track } from "@/lib/datafast";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
@@ -31,9 +30,6 @@ export function SignIn() {
       return;
     }
 
-    track("signin_completed", {
-      auth_method: "email",
-    });
     setMessage("Signed in successfully!");
     setLoading(false);
 

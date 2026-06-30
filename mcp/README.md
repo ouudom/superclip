@@ -18,7 +18,6 @@ By default it talks to the **official hosted SupoClip API** at
 | `supoclip_list_transitions` | – | Available transition effects |
 | `supoclip_broll_status` | – | Whether B-roll overlays are configured |
 | `supoclip_list_fonts` | ✓ | Subtitle fonts available to your account |
-| `supoclip_billing_summary` | ✓ | Plan, usage and remaining quota |
 | `supoclip_create_clip_task` | ✓ | Start clipping a video → returns a `task_id` |
 | `supoclip_list_tasks` | ✓ | List your tasks |
 | `supoclip_get_task` | ✓ | Task status, progress and clips |

@@ -10,46 +10,27 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
-import { Switch } from "@/components/ui/switch";
 import { signOut, useSession } from "@/lib/auth-client";
-import { formatBillingPlanName, getPublicBillingPlans, isPaidBillingPlan, type BillingPlanId } from "@/lib/billing-plans";
-import { track } from "@/lib/datafast";
 import Link from "next/link";
-import { Type, Palette, CheckCircle, AlertCircle, Settings, ArrowLeft, Mail, KeyRound, ChevronRight } from "lucide-react";
+import { Type, Palette, CheckCircle, AlertCircle, Settings, ArrowLeft, KeyRound, ChevronRight } from "lucide-react";
 
 interface UserPreferences {
   fontFamily: string;
   fontSize: number;
   fontColor: string;
-  notifyOnCompletion: boolean;
-}
-
-interface BillingSummary {
-  monetization_enabled: boolean;
-  plan: string;
-  subscription_status: string;
-  usage_count: number;
-  usage_limit: number | null;
-  remaining: number | null;
-  upgrade_required: boolean;
 }
 
 export default function SettingsPage() {
   const [fontFamily, setFontFamily] = useState("TikTokSans-Regular");
   const [fontSize, setFontSize] = useState(24);
   const [fontColor, setFontColor] = useState("#FFFFFF");
-  const [completionEmails, setCompletionEmails] = useState(true);
   const [availableFonts, setAvailableFonts] = useState<Array<{ name: string, display_name: string }>>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isFetching, setIsFetching] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
-  const [billingSummary, setBillingSummary] = useState<BillingSummary | null>(null);
-  const [isBillingActionLoading, setIsBillingActionLoading] = useState(false);
   const { data: session, isPending } = useSession();
   const isAdmin = Boolean((session?.user as { is_admin?: boolean } | undefined)?.is_admin);
-
-  const paidPlans = getPublicBillingPlans();
 
   // Load available fonts from backend and inject them into the page
   useEffect(() => {
@@ -106,7 +87,6 @@ export default function SettingsPage() {
           setFontFamily(data.fontFamily);
           setFontSize(data.fontSize);
           setFontColor(data.fontColor);
-          setCompletionEmails(data.notifyOnCompletion ?? true);
         }
       } catch (error) {
         console.error('Failed to load preferences:', error);
@@ -117,73 +97,6 @@ export default function SettingsPage() {
 
     loadPreferences();
   }, [session?.user?.id]);
-
-  useEffect(() => {
-    const fetchBillingSummary = async () => {
-      if (!session?.user?.id) return;
-
-      try {
-        const response = await fetch("/api/tasks/billing-summary", {
-          cache: "no-store",
-        });
-
-        if (!response.ok) {
-          return;
-        }
-
-        const data: BillingSummary = await response.json();
-        setBillingSummary(data);
-      } catch (fetchError) {
-        console.error("Failed to fetch billing summary:", fetchError);
-      }
-    };
-
-    fetchBillingSummary();
-  }, [session?.user?.id]);
-
-  const handleBillingAction = async (selectedPlan?: BillingPlanId) => {
-    if (!billingSummary?.monetization_enabled) return;
-
-    const isPaid = isPaidBillingPlan(billingSummary.plan);
-    const route = isPaid ? "/api/billing/portal" : "/api/billing/checkout";
-    const body = !isPaid && selectedPlan ? JSON.stringify({ plan: selectedPlan }) : undefined;
-
-    try {
-      setIsBillingActionLoading(true);
-      const response = await fetch(route, {
-        method: "POST",
-        ...(body
-          ? {
-              headers: { "Content-Type": "application/json" },
-              body,
-            }
-          : {}),
-      });
-      const responseText = await response.text();
-      let data: { url?: string; error?: string } = {};
-      if (responseText) {
-        try {
-          data = JSON.parse(responseText);
-        } catch {
-          data = { error: responseText };
-        }
-      }
-
-      if (!response.ok || !data.url) {
-        throw new Error(data.error || "Unable to open billing");
-      }
-
-      track(isPaid ? "billing_portal_opened" : "billing_checkout_started", {
-        plan: billingSummary.plan,
-        selected_plan: selectedPlan,
-      });
-      window.location.href = data.url;
-    } catch (billingError) {
-      setError(billingError instanceof Error ? billingError.message : "Billing action failed");
-    } finally {
-      setIsBillingActionLoading(false);
-    }
-  };
 
   const handleSavePreferences = async () => {
     setIsLoading(true);
@@ -200,7 +113,6 @@ export default function SettingsPage() {
           fontFamily,
           fontSize,
           fontColor,
-          notifyOnCompletion: completionEmails,
         }),
       });
 
@@ -209,7 +121,6 @@ export default function SettingsPage() {
         throw new Error(errorData.error || 'Failed to save preferences');
       }
 
-      track("preferences_saved");
       setSuccess(true);
       setTimeout(() => setSuccess(false), 3000);
     } catch (error) {
@@ -429,32 +340,6 @@ export default function SettingsPage() {
               </div>
             </div>
 
-            {/* Notifications Section */}
-            <div className="space-y-6">
-              <div>
-                <h3 className="text-lg font-semibold text-black mb-1">
-                  Notifications
-                </h3>
-                <p className="text-sm text-gray-600">
-                  Manage how you receive updates about your clips
-                </p>
-              </div>
-
-              <div className="flex items-center justify-between">
-                <Label htmlFor="completion-emails" className="flex items-center gap-2 text-sm font-medium text-black cursor-pointer">
-                  <Mail className="w-4 h-4" />
-                  Completion emails
-                  <span className="text-gray-500 font-normal">— get notified when clips are ready</span>
-                </Label>
-                <Switch
-                  id="completion-emails"
-                  checked={completionEmails}
-                  onCheckedChange={setCompletionEmails}
-                  disabled={isLoading}
-                />
-              </div>
-            </div>
-
             {/* Developer Section */}
             <div className="space-y-6">
               <div>
@@ -499,58 +384,6 @@ export default function SettingsPage() {
                   {error}
                 </AlertDescription>
               </Alert>
-            )}
-
-            {/* Save Button */}
-            {billingSummary?.monetization_enabled && (
-              <div className="border rounded-lg p-4 bg-gray-50 space-y-3">
-                <div>
-                  <h3 className="text-lg font-semibold text-black">Billing</h3>
-                  {!isPaidBillingPlan(billingSummary.plan) && (
-                    <p className="text-sm text-gray-600">Video processing requires a paid plan.</p>
-                  )}
-                  <p className="text-sm text-gray-600">
-                    {billingSummary.upgrade_required
-                      ? "Current plan cannot create generations."
-                      : billingSummary.usage_limit === null
-                      ? `${billingSummary.usage_count} generations in this billing period`
-                      : `${billingSummary.usage_count}/${billingSummary.usage_limit} generations used this period`}
-                  </p>
-                  <p className="text-sm text-gray-500">
-                    Plan: {formatBillingPlanName(billingSummary.plan)} ({billingSummary.subscription_status})
-                  </p>
-                </div>
-
-                {isPaidBillingPlan(billingSummary.plan) ? (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => handleBillingAction()}
-                    disabled={isBillingActionLoading}
-                    className="w-full"
-                  >
-                    {isBillingActionLoading ? "Loading..." : "Manage Billing"}
-                  </Button>
-                ) : (
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    {paidPlans.map((plan) => (
-                      <Button
-                        key={plan.id}
-                        type="button"
-                        variant={plan.highlighted ? "default" : "outline"}
-                        onClick={() => handleBillingAction(plan.id)}
-                        disabled={isBillingActionLoading}
-                        className="h-auto min-h-12 flex-col gap-0.5 py-2"
-                      >
-                        <span>{isBillingActionLoading ? "Loading..." : plan.cta}</span>
-                        <span className="text-xs font-normal opacity-80">
-                          ${plan.priceMonthly}/mo · {plan.generationLimit} generations
-                        </span>
-                      </Button>
-                    ))}
-                  </div>
-                )}
-              </div>
             )}
 
             <Button

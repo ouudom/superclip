@@ -4,7 +4,6 @@ import { useState } from "react";
 import { MessageSquare, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { useSession } from "@/lib/auth-client";
-import { track } from "@/lib/datafast";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -54,9 +53,6 @@ export function FeedbackButton() {
       }
 
       toast.success("Feedback submitted — thank you!");
-      track("feedback_submitted", {
-        category,
-      });
       setCategory("");
       setMessage("");
       setOpen(false);

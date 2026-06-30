@@ -60,6 +60,9 @@ class Config:
 
         self.self_host = self._get_bool_env("SELF_HOST", True)
         self.monetization_enabled = not self.self_host
+        self.worker_max_jobs = int(
+            os.getenv("WORKER_MAX_JOBS", "1" if self.self_host else "4")
+        )
         self.backend_auth_secret = self._get_optional_env("BACKEND_AUTH_SECRET")
         self.allow_unsigned_backend_auth = self._get_bool_env(
             "ALLOW_UNSIGNED_BACKEND_AUTH", False
@@ -76,10 +79,6 @@ class Config:
                 "http://localhost:3107",
                 "http://sp.localhost:3107",
             ],
-        )
-        self.resend_api_key = self._get_optional_env("RESEND_API_KEY")
-        self.resend_from_email = os.getenv(
-            "RESEND_FROM_EMAIL", "SupoClip <onboarding@resend.dev>"
         )
         self.app_base_url = (
             self._get_optional_env("NEXT_PUBLIC_APP_URL") or "http://localhost:3107"

@@ -13,7 +13,6 @@ import aiofiles
 from ...config import get_config
 from ...database import get_db
 from ...auth_headers import resolve_authenticated_user_id
-from ...services.billing_service import BillingService
 from ...font_registry import (
     FONTS_DIR,
     SUPPORTED_FONT_EXTENSIONS,
@@ -122,17 +121,6 @@ async def upload_font(
     """Upload a custom .ttf/.otf font so it appears in the font picker."""
     try:
         user_id = await _get_authenticated_user_id(request, db)
-        billing_service = BillingService(db)
-        summary = await billing_service.get_usage_summary(user_id)
-        paid_access = not summary.get("monetization_enabled") or (
-            summary.get("plan") in {"pro", "scale"}
-            and summary.get("subscription_status") in {"active", "trialing"}
-        )
-        if not paid_access:
-            raise HTTPException(
-                status_code=403,
-                detail="Custom font uploads are available for paid plans only",
-            )
 
         if not uploaded_file.filename:
             raise HTTPException(status_code=400, detail="Missing file name")

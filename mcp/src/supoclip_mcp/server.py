@@ -73,7 +73,7 @@ class SupoClipApiKeyVerifier:
         try:
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 response = await client.get(
-                    f"{self.api_url}/tasks/billing/summary",
+                    f"{self.api_url}/tasks/",
                     headers={"Authorization": f"Bearer {token}"},
                 )
         except httpx.HTTPError:
@@ -308,32 +308,6 @@ async def supoclip_list_fonts() -> str:
     return _json(data)
 
 
-@mcp.tool(
-    name="supoclip_billing_summary",
-    annotations={
-        "title": "Billing & Usage Summary",
-        "readOnlyHint": True,
-        "destructiveHint": False,
-        "idempotentHint": True,
-        "openWorldHint": True,
-    },
-)
-@tool_errors
-async def supoclip_billing_summary() -> str:
-    """Get the authenticated account's plan, usage and remaining quota.
-
-    Useful before creating tasks to check whether a paid plan / remaining quota
-    allows another video. Requires authentication.
-
-    Returns:
-        str: JSON with ``plan``, ``subscription_status``, ``usage_count``,
-        ``usage_limit``, ``remaining``, ``upgrade_required`` and
-        ``monetization_enabled``.
-    """
-    data = await _client().request("GET", "/tasks/billing/summary")
-    return _json(data)
-
-
 # --------------------------------------------------------------------------- #
 # Authenticated tools — task lifecycle
 # --------------------------------------------------------------------------- #
@@ -368,8 +342,7 @@ async def supoclip_create_clip_task(
     Track progress with ``supoclip_wait_for_task`` or ``supoclip_get_task``, then
     fetch results with ``supoclip_list_clips`` / ``supoclip_download_clip``.
 
-    Requires authentication. On the hosted service a paid plan / available quota
-    may be required (a 402 error indicates this — see ``supoclip_billing_summary``).
+    Requires authentication.
 
     Args:
         url: YouTube or direct video URL to clip.

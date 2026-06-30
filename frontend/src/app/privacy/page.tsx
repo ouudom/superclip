@@ -102,18 +102,10 @@ export default function PrivacyPolicyPage() {
               clips, transcripts, captions, and related processing metadata so you can view, edit,
               and export them. You are responsible for having the rights to any content you submit.
             </p>
-            <p className="font-medium text-foreground">Billing information.</p>
-            <p>
-              Paid plans are processed by our payment processor, Stripe. We do not store your full
-              card number; we retain your subscription status and a customer identifier needed to
-              manage billing.
-            </p>
             <p className="font-medium text-foreground">Usage, device, and log data.</p>
             <p>
               We collect session identifiers, IP address, and basic technical logs to operate,
-              secure, and debug the Service. If analytics are enabled for the hosted site, we use a
-              privacy-friendly analytics provider that does not build cross-site advertising
-              profiles.
+              secure, and debug the Service.
             </p>
           </Section>
 
@@ -121,8 +113,6 @@ export default function PrivacyPolicyPage() {
             <ul className="list-disc space-y-2 pl-6">
               <li>Provide the Service&mdash;process your videos and generate, edit, and export clips.</li>
               <li>Authenticate you and keep your account secure.</li>
-              <li>Process payments and manage subscriptions.</li>
-              <li>Send transactional email (for example sign-up confirmation, completion notices, and billing receipts).</li>
               <li>Maintain, debug, secure, and improve the Service.</li>
               <li>Comply with legal obligations and enforce our terms.</li>
             </ul>
@@ -136,8 +126,6 @@ export default function PrivacyPolicyPage() {
             <ul className="list-disc space-y-2 pl-6">
               <li><span className="text-foreground">Transcription</span> &mdash; to transcribe audio from your videos.</li>
               <li><span className="text-foreground">AI/LLM providers</span> &mdash; to analyze transcripts and identify clip-worthy segments.</li>
-              <li><span className="text-foreground">Stripe</span> &mdash; payment processing.</li>
-              <li><span className="text-foreground">Email delivery</span> &mdash; transactional emails.</li>
               <li><span className="text-foreground">Hosting &amp; infrastructure</span> &mdash; to run the Service.</li>
             </ul>
             <p>

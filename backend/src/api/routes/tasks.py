@@ -16,7 +16,6 @@ import re
 from ...database import get_db
 from ...database import AsyncSessionLocal
 from ...services.task_service import TaskService
-from ...services.billing_service import BillingService, BillingLimitExceeded
 from ...auth_headers import resolve_authenticated_user_id
 from ...workers.job_queue import JobQueue
 from ...workers.progress import ProgressTracker
@@ -206,9 +205,6 @@ async def create_task(request: Request, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Source URL is required")
 
     try:
-        billing_service = BillingService(db)
-        await billing_service.assert_can_create_task(user_id)
-
         task_service = TaskService(db)
 
         # Create task
@@ -271,37 +267,9 @@ async def create_task(request: Request, db: AsyncSession = Depends(get_db)):
 
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
-    except BillingLimitExceeded as e:
-        raise HTTPException(
-            status_code=402,
-            detail={
-                "code": "SUBSCRIPTION_REQUIRED",
-                "message": "Choose a paid plan to process videos.",
-                "billing": e.summary,
-            },
-        )
     except Exception as e:
         logger.error(f"Error creating task: {e}")
         raise HTTPException(status_code=500, detail=f"Error creating task: {str(e)}")
-
-
-@router.get("/billing/summary")
-async def get_billing_summary(request: Request, db: AsyncSession = Depends(get_db)):
-    """Get monetization status and current usage for authenticated user."""
-    user_id = await _get_user_id_from_headers(request, db)
-
-    try:
-        billing_service = BillingService(db)
-        summary = await billing_service.get_usage_summary(user_id)
-        return summary
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
-        logger.error(f"Error retrieving billing summary: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Error retrieving billing summary: {str(e)}",
-        )
 
 
 @router.get("/{task_id}")

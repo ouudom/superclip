@@ -141,5 +141,5 @@ class WorkerSettings:
     job_timeout = 10800  # 3 hour timeout for video processing
 
     # Worker pool settings
-    max_jobs = 4  # Process up to 4 jobs simultaneously
+    max_jobs = config.worker_max_jobs
     cron_jobs = []
