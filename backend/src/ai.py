@@ -398,6 +398,40 @@ def _build_transcript_model(runtime_config: Config) -> Model | str:
     )
 
 
+def _format_provider_error_for_ui(error: Exception, runtime_config: Config) -> str:
+    message = str(error)
+    status_match = re.search(r"status_code:\s*(\d+)", message)
+    model_match = re.search(r"model_name:\s*([^,\n]+)", message)
+    has_html_body = bool(re.search(r"<!doctype html|<html\b", message, re.IGNORECASE))
+
+    if has_html_body:
+        provider, provider_model_name = _split_llm_name(runtime_config.llm)
+        provider_label = "9Router" if provider in {"9router", "ninerouter"} else "LLM provider"
+        status = status_match.group(1) if status_match else "non-JSON"
+        model_name = (
+            model_match.group(1).strip()
+            if model_match
+            else provider_model_name
+            or "selected model"
+        )
+
+        if provider in {"9router", "ninerouter"}:
+            return (
+                f"{provider_label} API returned {status} for model '{model_name}'. "
+                "Check NINEROUTER_BASE_URL and model name."
+            )
+
+        return (
+            f"{provider_label} returned {status} for model '{model_name}'. "
+            "Check LLM provider URL and model name."
+        )
+
+    if len(message) > 800:
+        return f"{message[:800].rstrip()}..."
+
+    return message
+
+
 def get_transcript_agent() -> Agent[None, TranscriptAnalysis]:
     """Get or create the transcript analysis agent (lazy initialization)."""
     global _transcript_agent, _transcript_agent_signature
@@ -779,7 +813,8 @@ async def get_most_relevant_parts_by_transcript(
 
     except Exception as e:
         logger.error(f"Error in transcript analysis: {e}")
-        raise RuntimeError(f"Transcript analysis failed: {str(e)}") from e
+        safe_message = _format_provider_error_for_ui(e, get_config())
+        raise RuntimeError(f"Transcript analysis failed: {safe_message}") from e
 
 
 def get_most_relevant_parts_sync(transcript: str) -> TranscriptAnalysis:

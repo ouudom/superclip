@@ -11,6 +11,7 @@ from src.ai import (
     _build_transcript_model,
     _choose_repaired_bounds,
     _extract_transcript_text,
+    _format_provider_error_for_ui,
     _format_transcript_timestamp,
     _get_missing_llm_key_error,
     _parse_transcript_spans,
@@ -97,6 +98,21 @@ def test_9router_llm_builds_openai_compatible_model():
 
     assert isinstance(model, OpenAIChatModel)
     assert model.model_name == "local-model"
+
+
+def test_provider_html_error_is_sanitized_for_ui():
+    runtime_config = SimpleNamespace(llm="9router:router-combo")
+    error = Exception(
+        'status_code: 404, model_name: router-combo, body: <!DOCTYPE html><html><title>404</title></html>'
+    )
+
+    message = _format_provider_error_for_ui(error, runtime_config)
+
+    assert message == (
+        "9Router API returned 404 for model 'router-combo'. "
+        "Check NINEROUTER_BASE_URL and model name."
+    )
+    assert "<html" not in message
 
 
 def test_parse_transcript_timestamp_supports_minute_and_hour_formats():
