@@ -418,6 +418,219 @@ class TaskRepository:
         return tasks
 
     @staticmethod
+    async def search_user_library(
+        db: AsyncSession,
+        user_id: str,
+        *,
+        limit: int = 100,
+        q: str | None = None,
+        status: str | None = None,
+        tag: str | None = None,
+        content_pillar: str | None = None,
+        platform: str | None = None,
+        series_name: str | None = None,
+        archived: bool = False,
+    ) -> List[Dict[str, Any]]:
+        """Search content library rows with task, source, clip, and metadata fields."""
+        where_parts = ["t.user_id = :user_id", "COALESCE(m.archived, false) = :archived"]
+        params: Dict[str, Any] = {
+            "user_id": user_id,
+            "limit": limit,
+            "archived": archived,
+        }
+
+        if q:
+            where_parts.append(
+                """
+                (
+                    s.title ILIKE :q
+                    OR s.type ILIKE :q
+                    OR COALESCE(m.content_pillar, '') ILIKE :q
+                    OR COALESCE(m.series_name, '') ILIKE :q
+                    OR array_to_string(COALESCE(m.tags, ARRAY[]::text[]), ' ') ILIKE :q
+                    OR EXISTS (
+                        SELECT 1 FROM generated_clips gc_search
+                        WHERE gc_search.task_id = t.id
+                        AND COALESCE(gc_search.text, '') ILIKE :q
+                    )
+                )
+                """
+            )
+            params["q"] = f"%{q.strip()}%"
+        if status and status != "all":
+            where_parts.append("t.status = :status")
+            params["status"] = status
+        if tag:
+            where_parts.append(":tag = ANY(COALESCE(m.tags, ARRAY[]::text[]))")
+            params["tag"] = tag.strip().lower()
+        if content_pillar:
+            where_parts.append("m.content_pillar = :content_pillar")
+            params["content_pillar"] = content_pillar.strip()
+        if platform:
+            where_parts.append("m.platform = :platform")
+            params["platform"] = platform.strip()
+        if series_name:
+            where_parts.append("m.series_name = :series_name")
+            params["series_name"] = series_name.strip()
+
+        result = await db.execute(
+            text(f"""
+                SELECT
+                    t.id,
+                    t.user_id,
+                    t.source_id,
+                    t.status,
+                    t.created_at,
+                    t.updated_at,
+                    t.completed_at,
+                    t.cache_hit,
+                    s.title AS source_title,
+                    s.type AS source_type,
+                    COALESCE(m.tags, ARRAY[]::text[]) AS tags,
+                    m.content_pillar,
+                    m.series_name,
+                    m.platform,
+                    COALESCE(m.library_status, 'draft') AS library_status,
+                    COALESCE(m.pinned, false) AS pinned,
+                    COALESCE(m.archived, false) AS archived,
+                    m.notes,
+                    COUNT(gc.id) AS clips_count,
+                    COALESCE(SUM(gc.duration), 0) AS total_duration,
+                    COALESCE(MAX(gc.virality_score), 0) AS best_virality_score,
+                    COALESCE(AVG(gc.relevance_score), 0) AS average_relevance_score
+                FROM tasks t
+                LEFT JOIN sources s ON t.source_id = s.id
+                LEFT JOIN task_library_metadata m ON m.task_id = t.id
+                LEFT JOIN generated_clips gc ON gc.task_id = t.id
+                WHERE {' AND '.join(where_parts)}
+                GROUP BY
+                    t.id,
+                    s.title,
+                    s.type,
+                    m.tags,
+                    m.content_pillar,
+                    m.series_name,
+                    m.platform,
+                    m.library_status,
+                    m.pinned,
+                    m.archived,
+                    m.notes
+                ORDER BY COALESCE(m.pinned, false) DESC, t.updated_at DESC
+                LIMIT :limit
+            """),
+            params,
+        )
+
+        return [
+            {
+                "id": row.id,
+                "user_id": row.user_id,
+                "source_id": row.source_id,
+                "source_title": row.source_title,
+                "source_type": row.source_type,
+                "status": row.status,
+                "clips_count": int(row.clips_count or 0),
+                "total_duration": float(row.total_duration or 0),
+                "best_virality_score": int(row.best_virality_score or 0),
+                "average_relevance_score": float(row.average_relevance_score or 0),
+                "tags": list(row.tags or []),
+                "content_pillar": row.content_pillar,
+                "series_name": row.series_name,
+                "platform": row.platform,
+                "library_status": row.library_status,
+                "pinned": bool(row.pinned),
+                "archived": bool(row.archived),
+                "notes": row.notes,
+                "cache_hit": bool(row.cache_hit),
+                "completed_at": row.completed_at,
+                "created_at": row.created_at,
+                "updated_at": row.updated_at,
+            }
+            for row in result.fetchall()
+        ]
+
+    @staticmethod
+    async def update_library_metadata(
+        db: AsyncSession,
+        task_id: str,
+        *,
+        tags: list[str] | None = None,
+        content_pillar: str | None = None,
+        series_name: str | None = None,
+        platform: str | None = None,
+        library_status: str | None = None,
+        pinned: bool | None = None,
+        archived: bool | None = None,
+        notes: str | None = None,
+    ) -> Dict[str, Any]:
+        """Upsert library metadata for a task."""
+        await db.execute(
+            text("""
+                INSERT INTO task_library_metadata (task_id, created_at, updated_at)
+                VALUES (:task_id, NOW(), NOW())
+                ON CONFLICT (task_id)
+                DO NOTHING
+            """),
+            {"task_id": task_id},
+        )
+
+        set_parts = []
+        params: Dict[str, Any] = {"task_id": task_id}
+        fields = {
+            "tags": tags,
+            "content_pillar": content_pillar,
+            "series_name": series_name,
+            "platform": platform,
+            "library_status": library_status,
+            "pinned": pinned,
+            "archived": archived,
+            "notes": notes,
+        }
+        for field, value in fields.items():
+            if value is not None:
+                if field == "tags":
+                    set_parts.append(f"{field} = CAST(:{field} AS TEXT[])")
+                else:
+                    set_parts.append(f"{field} = :{field}")
+                params[field] = value
+        if set_parts:
+            set_parts.append("updated_at = NOW()")
+            await db.execute(
+                text(
+                    f"""
+                    UPDATE task_library_metadata
+                    SET {', '.join(set_parts)}
+                    WHERE task_id = :task_id
+                    """
+                ),
+                params,
+            )
+        await db.commit()
+
+        result = await db.execute(
+            text("""
+                SELECT task_id, tags, content_pillar, series_name, platform,
+                       library_status, pinned, archived, notes, updated_at
+                FROM task_library_metadata
+                WHERE task_id = :task_id
+            """),
+            {"task_id": task_id},
+        )
+        row = result.fetchone()
+        return {
+            "task_id": row.task_id,
+            "tags": list(row.tags or []),
+            "content_pillar": row.content_pillar,
+            "series_name": row.series_name,
+            "platform": row.platform,
+            "library_status": row.library_status,
+            "pinned": bool(row.pinned),
+            "archived": bool(row.archived),
+            "notes": row.notes,
+            "updated_at": row.updated_at,
+        }
+
+    @staticmethod
     async def user_exists(db: AsyncSession, user_id: str) -> bool:
         """Check if a user exists in the database."""
         result = await db.execute(

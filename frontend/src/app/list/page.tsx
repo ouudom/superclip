@@ -396,6 +396,16 @@ export default function ListPage() {
                 Back
               </Button>
             </Link>
+            <Link href="/library">
+              <Button variant="outline" size="sm">
+                Library
+              </Button>
+            </Link>
+            <Link href="/agents">
+              <Button variant="outline" size="sm">
+                Agents
+              </Button>
+            </Link>
           </div>
 
           <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">

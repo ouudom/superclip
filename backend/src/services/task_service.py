@@ -3,6 +3,7 @@ Task service - orchestrates task creation and processing workflow.
 """
 
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import text
 from typing import Dict, Any, Optional, Callable
 import logging
 from datetime import datetime
@@ -826,6 +827,158 @@ class TaskService:
     ) -> list[Dict[str, Any]]:
         """Get all tasks for a user."""
         return await self.task_repo.get_user_tasks(self.db, user_id, limit)
+
+    @staticmethod
+    def _normalize_library_tags(value: Any) -> list[str]:
+        if isinstance(value, str):
+            raw_tags = value.split(",")
+        elif isinstance(value, list):
+            raw_tags = value
+        else:
+            return []
+
+        tags = []
+        seen = set()
+        for raw_tag in raw_tags:
+            tag = str(raw_tag).strip().lower()
+            if not tag or tag in seen:
+                continue
+            seen.add(tag)
+            tags.append(tag[:40])
+        return tags[:20]
+
+    @staticmethod
+    def _normalize_optional_text(value: Any, max_length: int) -> str | None:
+        if value is None:
+            return None
+        normalized = str(value).strip()
+        return normalized[:max_length] if normalized else None
+
+    async def search_content_library(
+        self,
+        user_id: str,
+        *,
+        limit: int = 100,
+        q: str | None = None,
+        status: str | None = None,
+        tag: str | None = None,
+        content_pillar: str | None = None,
+        platform: str | None = None,
+        series_name: str | None = None,
+        archived: bool = False,
+    ) -> list[Dict[str, Any]]:
+        """Search old sources/clips using library metadata."""
+        return await self.task_repo.search_user_library(
+            self.db,
+            user_id,
+            limit=max(1, min(200, int(limit or 100))),
+            q=self._normalize_optional_text(q, 160),
+            status=self._normalize_optional_text(status, 40),
+            tag=self._normalize_optional_text(tag, 40),
+            content_pillar=self._normalize_optional_text(content_pillar, 120),
+            platform=self._normalize_optional_text(platform, 40),
+            series_name=self._normalize_optional_text(series_name, 160),
+            archived=archived,
+        )
+
+    async def update_content_library_metadata(
+        self, task_id: str, payload: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Update searchable library metadata for a task."""
+        return await self.task_repo.update_library_metadata(
+            self.db,
+            task_id,
+            tags=self._normalize_library_tags(payload.get("tags"))
+            if "tags" in payload
+            else None,
+            content_pillar=self._normalize_optional_text(
+                payload.get("content_pillar"), 120
+            )
+            if "content_pillar" in payload
+            else None,
+            series_name=self._normalize_optional_text(payload.get("series_name"), 160)
+            if "series_name" in payload
+            else None,
+            platform=self._normalize_optional_text(payload.get("platform"), 40)
+            if "platform" in payload
+            else None,
+            library_status=self._normalize_optional_text(
+                payload.get("library_status"), 40
+            )
+            if "library_status" in payload
+            else None,
+            pinned=bool(payload.get("pinned")) if "pinned" in payload else None,
+            archived=bool(payload.get("archived")) if "archived" in payload else None,
+            notes=self._normalize_optional_text(payload.get("notes"), 2000)
+            if "notes" in payload
+            else None,
+        )
+
+    async def get_content_library_stats(self, user_id: str) -> Dict[str, Any]:
+        """Return counts, disk usage, and rough AI spend estimate for the library."""
+        result = await self.db.execute(
+            text("""
+                SELECT
+                    COUNT(DISTINCT t.id) AS tasks_count,
+                    COUNT(DISTINCT gc.id) AS clips_count,
+                    COALESCE(SUM(gc.duration), 0) AS rendered_seconds,
+                    COUNT(DISTINCT t.id) FILTER (WHERE t.status = 'completed') AS completed_count,
+                    COUNT(DISTINCT t.id) FILTER (WHERE t.cache_hit = true) AS cache_hit_count
+                FROM tasks t
+                LEFT JOIN generated_clips gc ON gc.task_id = t.id
+                WHERE t.user_id = :user_id
+            """),
+            {"user_id": user_id},
+        )
+        row = result.fetchone()
+
+        path_result = await self.db.execute(
+            text("""
+                SELECT gc.file_path AS path
+                FROM generated_clips gc
+                JOIN tasks t ON t.id = gc.task_id
+                WHERE t.user_id = :user_id
+                UNION
+                SELECT ta.file_path AS path
+                FROM task_artifacts ta
+                JOIN tasks t ON t.id = ta.task_id
+                WHERE t.user_id = :user_id AND ta.file_path IS NOT NULL
+            """),
+            {"user_id": user_id},
+        )
+        disk_bytes = 0
+        missing_files = 0
+        for path_row in path_result.fetchall():
+            file_path = path_row.path
+            if not file_path:
+                continue
+            try:
+                candidate = Path(file_path)
+                if candidate.exists() and candidate.is_file():
+                    disk_bytes += candidate.stat().st_size
+                else:
+                    missing_files += 1
+            except OSError:
+                missing_files += 1
+
+        tasks_count = int(row.tasks_count or 0)
+        clips_count = int(row.clips_count or 0)
+        rendered_seconds = float(row.rendered_seconds or 0)
+        completed_count = int(row.completed_count or 0)
+        cache_hit_count = int(row.cache_hit_count or 0)
+        estimated_ai_spend = round(max(0, tasks_count - cache_hit_count) * 0.03, 2)
+
+        return {
+            "tasks_count": tasks_count,
+            "clips_count": clips_count,
+            "rendered_seconds": rendered_seconds,
+            "completed_count": completed_count,
+            "cache_hit_count": cache_hit_count,
+            "disk_bytes": disk_bytes,
+            "missing_files": missing_files,
+            "estimated_ai_spend_usd": estimated_ai_spend,
+            "estimate_note": "Rough placeholder: $0.03 per non-cache-hit task until provider token accounting lands.",
+        }
 
     async def delete_task(self, task_id: str) -> None:
         """Delete a task and all its associated clips."""

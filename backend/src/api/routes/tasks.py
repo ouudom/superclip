@@ -2,7 +2,7 @@
 Task API routes using refactored architecture.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
@@ -16,6 +16,7 @@ import re
 from ...database import get_db
 from ...database import AsyncSessionLocal
 from ...services.task_service import TaskService
+from ...services.workflow_service import WorkflowService
 from ...auth_headers import resolve_authenticated_user_id
 from ...workers.job_queue import JobQueue
 from ...workers.progress import ProgressTracker
@@ -220,6 +221,56 @@ async def list_tasks(
         raise HTTPException(status_code=500, detail=f"Error retrieving tasks: {str(e)}")
 
 
+@router.get("/library")
+async def search_library(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    limit: int = Query(100, ge=1, le=200),
+    q: str | None = None,
+    status: str | None = None,
+    tag: str | None = None,
+    content_pillar: str | None = None,
+    platform: str | None = None,
+    series_name: str | None = None,
+    archived: bool = False,
+):
+    """Search personal content library."""
+    try:
+        user_id = await _get_user_id_from_headers(request, db)
+        task_service = TaskService(db)
+        items = await task_service.search_content_library(
+            user_id,
+            limit=limit,
+            q=q,
+            status=status,
+            tag=tag,
+            content_pillar=content_pillar,
+            platform=platform,
+            series_name=series_name,
+            archived=archived,
+        )
+        return {"items": items, "total": len(items)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error searching library: {e}")
+        raise HTTPException(status_code=500, detail=f"Error searching library: {str(e)}")
+
+
+@router.get("/library/stats")
+async def get_library_stats(request: Request, db: AsyncSession = Depends(get_db)):
+    """Get personal content library stats."""
+    try:
+        user_id = await _get_user_id_from_headers(request, db)
+        task_service = TaskService(db)
+        return await task_service.get_content_library_stats(user_id)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error loading library stats: {e}")
+        raise HTTPException(status_code=500, detail=f"Error loading library stats: {str(e)}")
+
+
 @router.post("/")
 async def create_task(request: Request, db: AsyncSession = Depends(get_db)):
     """
@@ -230,33 +281,46 @@ async def create_task(request: Request, db: AsyncSession = Depends(get_db)):
 
     raw_source = data.get("source")
     user_id = await _get_user_id_from_headers(request, db)
+    workflow_config: Dict[str, Any] = {}
+    workflow_id = data.get("workflow_id")
+    if isinstance(workflow_id, str) and workflow_id:
+        workflow = await WorkflowService(db).get_workflow(workflow_id)
+        if not workflow:
+            raise HTTPException(status_code=404, detail="Workflow not found")
+        raw_config = workflow.get("config")
+        workflow_config = raw_config if isinstance(raw_config, dict) else {}
 
     # Get font options
     font_options = data.get("font_options", {})
     font_family = _normalize_font_family(
-        font_options.get("font_family", "THEBOLDFONT")
+        font_options.get("font_family") or workflow_config.get("font_family") or "THEBOLDFONT"
     )
-    font_size = _normalize_font_size(font_options.get("font_size", 24))
-    font_color = _normalize_font_color(font_options.get("font_color", "#FFFFFF"))
-    caption_template = data.get("caption_template", "default")
-    include_broll = data.get("include_broll", False)
+    font_size = _normalize_font_size(
+        font_options.get("font_size") or workflow_config.get("font_size") or 24
+    )
+    font_color = _normalize_font_color(
+        font_options.get("font_color") or workflow_config.get("font_color") or "#FFFFFF"
+    )
+    caption_template = data.get("caption_template") or workflow_config.get("caption_template") or "default"
+    include_broll = data.get("include_broll", workflow_config.get("include_broll", False))
     runtime_config = get_config()
     processing_mode = data.get(
-        "processing_mode", runtime_config.default_processing_mode
+        "processing_mode",
+        workflow_config.get("processing_mode", runtime_config.default_processing_mode),
     )
     if processing_mode not in {"fast", "balanced", "quality"}:
         processing_mode = runtime_config.default_processing_mode
-    output_format = data.get("output_format", "vertical")
+    output_format = data.get("output_format") or workflow_config.get("output_format") or "vertical"
     if output_format not in VALID_OUTPUT_FORMATS:
         output_format = "vertical"
-    add_subtitles = data.get("add_subtitles", True)
+    add_subtitles = data.get("add_subtitles", workflow_config.get("add_subtitles", True))
     if not isinstance(add_subtitles, bool):
         add_subtitles = True
     cleanup_settings = normalize_clip_cleanup_settings(
-        data.get("cut_long_pauses"),
-        data.get("pause_threshold_ms"),
-        data.get("remove_filler_words"),
-        data.get("filtered_words"),
+        data.get("cut_long_pauses", workflow_config.get("cut_long_pauses")),
+        data.get("pause_threshold_ms", workflow_config.get("pause_threshold_ms")),
+        data.get("remove_filler_words", workflow_config.get("remove_filler_words")),
+        data.get("filtered_words", workflow_config.get("filtered_words")),
     )
     if not raw_source or not raw_source.get("url"):
         raise HTTPException(status_code=400, detail="Source URL is required")
@@ -305,7 +369,7 @@ async def create_task(request: Request, db: AsyncSession = Depends(get_db)):
         await _save_task_source_metadata(
             task_id,
             _merge_task_source_metadata(
-                None,
+                {"workflow_id": workflow_id} if isinstance(workflow_id, str) else None,
                 source_url=raw_source["url"],
                 source_type=source_type,
                 output_format=output_format,
@@ -501,6 +565,27 @@ async def update_task(
     except Exception as e:
         logger.error(f"Error updating task: {e}")
         raise HTTPException(status_code=500, detail=f"Error updating task: {str(e)}")
+
+
+@router.patch("/{task_id}/library")
+async def update_task_library_metadata(
+    task_id: str, request: Request, db: AsyncSession = Depends(get_db)
+):
+    """Update content-library metadata for a task."""
+    try:
+        payload = await request.json()
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=400, detail="Payload must be an object")
+
+        task_service = TaskService(db)
+        await _require_task_owner(request, task_service, db, task_id)
+        metadata = await task_service.update_content_library_metadata(task_id, payload)
+        return {"metadata": metadata}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating task library metadata: {e}")
+        raise HTTPException(status_code=500, detail=f"Error updating library metadata: {str(e)}")
 
 
 @router.delete("/{task_id}")

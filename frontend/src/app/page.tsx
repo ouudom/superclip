@@ -16,7 +16,8 @@ import { signOut, useSession } from "@/lib/auth-client";
 import { formatSupportMessage, parseApiError } from "@/lib/api-error";
 import Link from "next/link";
 import Image from "next/image";
-import { ArrowRight, Youtube, CheckCircle, AlertCircle, Loader2, Palette, Type, Paintbrush, Film, Sparkles, Upload, Monitor, Menu, X, LogOut, List, Shield, Settings } from "lucide-react";
+import { useSearchParams } from "next/navigation";
+import { ArrowRight, Youtube, CheckCircle, AlertCircle, Loader2, Palette, Type, Paintbrush, Film, Sparkles, Upload, Monitor, Menu, X, LogOut, List, Shield, Settings, Workflow } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { isLandingOnlyModeEnabled } from "@/lib/app-flags";
 
@@ -36,6 +37,28 @@ interface FontOption {
 }
 
 type OutputFormat = "vertical" | "vertical_pan" | "vertical_split" | "original";
+
+interface WorkflowPreset {
+  id: string;
+  name: string;
+  description?: string | null;
+  output_target: string;
+  is_default: boolean;
+  config: {
+    processing_mode?: string;
+    output_format?: OutputFormat;
+    add_subtitles?: boolean;
+    include_broll?: boolean;
+    cut_long_pauses?: boolean;
+    pause_threshold_ms?: number;
+    remove_filler_words?: boolean;
+    filtered_words?: string[];
+    caption_template?: string;
+    font_family?: string;
+    font_size?: number;
+    font_color?: string;
+  };
+}
 
 const MAX_VIDEO_UPLOAD_BYTES = 1_000_000_000;
 
@@ -169,6 +192,7 @@ async function uploadVideoFileViaProxy(file: File): Promise<string> {
 }
 
 export default function Home() {
+  const searchParams = useSearchParams();
   const [url, setUrl] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -204,6 +228,8 @@ export default function Home() {
   const [pauseThresholdMs, setPauseThresholdMs] = useState("900");
   const [removeFillerWords, setRemoveFillerWords] = useState(false);
   const [filteredWords, setFilteredWords] = useState("");
+  const [workflows, setWorkflows] = useState<WorkflowPreset[]>([]);
+  const [selectedWorkflowId, setSelectedWorkflowId] = useState<string>("none");
 
   // Latest task state
   const [latestTask, setLatestTask] = useState<LatestTask | null>(null);
@@ -258,6 +284,68 @@ export default function Home() {
   useEffect(() => {
     void refreshFonts();
   }, [refreshFonts]);
+
+  const applyWorkflowConfig = useCallback((workflow: WorkflowPreset) => {
+    const config = workflow.config || {};
+    if (config.output_format) {
+      setOutputFormat(config.output_format);
+    }
+    if (typeof config.add_subtitles === "boolean") {
+      setAddSubtitles(config.add_subtitles);
+    }
+    if (typeof config.include_broll === "boolean") {
+      setIncludeBroll(config.include_broll);
+    }
+    if (typeof config.cut_long_pauses === "boolean") {
+      setCutLongPauses(config.cut_long_pauses);
+    }
+    if (typeof config.pause_threshold_ms === "number") {
+      setPauseThresholdMs(String(config.pause_threshold_ms));
+    }
+    if (typeof config.remove_filler_words === "boolean") {
+      setRemoveFillerWords(config.remove_filler_words);
+    }
+    if (Array.isArray(config.filtered_words)) {
+      setFilteredWords(config.filtered_words.join(", "));
+    }
+    if (config.caption_template) {
+      setCaptionTemplate(config.caption_template);
+    }
+    if (config.font_family) {
+      setFontFamily(config.font_family);
+    }
+    if (typeof config.font_size === "number") {
+      setFontSize(config.font_size);
+    }
+    if (config.font_color) {
+      setFontColor(config.font_color);
+    }
+  }, []);
+
+  useEffect(() => {
+    const loadWorkflows = async () => {
+      if (!session?.user?.id) return;
+      try {
+        const response = await fetch("/api/workflows", { cache: "no-store" });
+        if (!response.ok) return;
+        const data = await response.json();
+        const nextWorkflows = (data.workflows || []) as WorkflowPreset[];
+        setWorkflows(nextWorkflows);
+        const requestedWorkflowId = searchParams.get("workflow");
+        const initialWorkflow =
+          nextWorkflows.find((workflow) => workflow.id === requestedWorkflowId) ||
+          nextWorkflows.find((workflow) => workflow.is_default);
+        if (initialWorkflow) {
+          setSelectedWorkflowId(initialWorkflow.id);
+          applyWorkflowConfig(initialWorkflow);
+        }
+      } catch (workflowError) {
+        console.error("Failed to load workflows:", workflowError);
+      }
+    };
+
+    void loadWorkflows();
+  }, [applyWorkflowConfig, searchParams, session?.user?.id]);
 
   // Load caption templates and check B-roll availability
   useEffect(() => {
@@ -362,6 +450,14 @@ export default function Home() {
     }
     if (selectedTemplate.font_color) {
       setFontColor(selectedTemplate.font_color);
+    }
+  };
+
+  const handleWorkflowChange = (workflowId: string) => {
+    setSelectedWorkflowId(workflowId);
+    const workflow = workflows.find((item) => item.id === workflowId);
+    if (workflow) {
+      applyWorkflowConfig(workflow);
     }
   };
 
@@ -493,13 +589,15 @@ export default function Home() {
           },
           caption_template: captionTemplate,
           include_broll: includeBroll,
-          processing_mode: "fast",
+          processing_mode:
+            workflows.find((workflow) => workflow.id === selectedWorkflowId)?.config.processing_mode || "fast",
           output_format: outputFormat,
           add_subtitles: addSubtitles,
           cut_long_pauses: cutLongPauses,
           pause_threshold_ms: normalizedPauseThreshold,
           remove_filler_words: removeFillerWords,
           filtered_words: normalizedFilteredWords,
+          workflow_id: selectedWorkflowId === "none" ? undefined : selectedWorkflowId,
         }),
       });
 
@@ -599,6 +697,16 @@ export default function Home() {
                   All Generations
                 </Button>
               </Link>
+              <Link href="/workflows">
+                <Button variant="outline" size="sm">
+                  Workflows
+                </Button>
+              </Link>
+              <Link href="/agents">
+                <Button variant="outline" size="sm">
+                  Agents
+                </Button>
+              </Link>
               {isAdmin && (
                 <Link href="/admin">
                   <Button variant="outline" size="sm">
@@ -670,6 +778,14 @@ export default function Home() {
               >
                 <List className="w-4 h-4 text-stone-400" />
                 All Generations
+              </Link>
+              <Link
+                href="/workflows"
+                onClick={() => setMobileMenuOpen(false)}
+                className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-stone-700 hover:bg-gray-50 transition-colors"
+              >
+                <Workflow className="w-4 h-4 text-stone-400" />
+                Workflows
               </Link>
               {isAdmin && (
                 <Link
@@ -776,6 +892,41 @@ export default function Home() {
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-6">
+              {workflows.length > 0 && (
+                <Card className="border-stone-200">
+                  <CardContent className="px-4 pt-0 pb-2.5 space-y-2.5">
+                    <div className="flex items-center gap-2 text-sm font-medium text-stone-900">
+                      <Workflow className="w-4 h-4" />
+                      Workflow
+                    </div>
+                    <Select
+                      value={selectedWorkflowId}
+                      onValueChange={handleWorkflowChange}
+                      disabled={generationControlsDisabled}
+                    >
+                      <SelectTrigger className="h-11">
+                        <SelectValue placeholder="Choose workflow" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Manual settings</SelectItem>
+                        {workflows.map((workflow) => (
+                          <SelectItem key={workflow.id} value={workflow.id}>
+                            {workflow.name}
+                            {workflow.is_default ? " (default)" : ""}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {selectedWorkflowId !== "none" && (
+                      <p className="text-xs text-stone-500">
+                        {workflows.find((workflow) => workflow.id === selectedWorkflowId)?.description ||
+                          "Preset will apply clipping, cleanup, and render settings."}
+                      </p>
+                    )}
+                  </CardContent>
+                </Card>
+              )}
+
               {/* Source Type Tabs */}
               <div className="space-y-3">
                 <div className="flex gap-2">

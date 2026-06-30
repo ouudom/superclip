@@ -23,7 +23,9 @@ from .database import AsyncSessionLocal, close_db, configure_database, get_db, i
 from .runtime_settings import load_runtime_settings_cache
 from .workers.job_queue import JobQueue
 from .api.routes import tasks
+from .api.routes.agents import router as agents_router
 from .api.routes.admin import router as admin_router
+from .api.routes.workflows import router as workflows_router
 from .observability import (
     TRACE_HEADER,
     clear_trace_id,
@@ -164,6 +166,8 @@ def create_app(
         )
 
     app.include_router(tasks.router)
+    app.include_router(agents_router)
+    app.include_router(workflows_router)
     app.include_router(admin_router)
 
     from .api.routes.media import router as media_router
