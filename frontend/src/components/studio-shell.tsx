@@ -7,13 +7,12 @@ import {
   Download,
   Film,
   FolderOpen,
-  Home,
   LogOut,
   Menu,
   PackageOpen,
   PlusCircle,
   Settings,
-  Workflow,
+  SlidersHorizontal,
   X,
 } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -27,7 +26,7 @@ const navItems = [
   { href: "/list", label: "Projects", icon: FolderOpen },
   { href: "/library", label: "Clips", icon: Film },
   { href: "/sources", label: "Sources", icon: PackageOpen },
-  { href: "/workflows", label: "Workflows", icon: Workflow },
+  { href: "/presets", label: "Presets", icon: SlidersHorizontal },
   { href: "/publishing", label: "Exports", icon: Download },
   { href: "/settings", label: "Settings", icon: Settings },
 ];

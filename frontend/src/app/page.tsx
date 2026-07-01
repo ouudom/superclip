@@ -6,9 +6,7 @@ import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import {
   AlertCircle,
   ArrowRight,
-  CheckCircle2,
   ChevronRight,
-  Clock3,
   FileVideo,
   Loader2,
   Play,
@@ -21,7 +19,6 @@ import {
 
 import { StudioShell } from "@/components/studio-shell";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -45,7 +42,7 @@ interface FontOption {
   format?: string;
 }
 
-interface WorkflowPreset {
+interface Preset {
   id: string;
   name: string;
   description?: string | null;
@@ -81,15 +78,6 @@ type ProxyUploadAuthorization = {
 type UploadAuthorization = DirectUploadAuthorization | ProxyUploadAuthorization;
 
 const MAX_VIDEO_UPLOAD_BYTES = 1_000_000_000;
-
-const statusCopy: Record<string, { label: string; className: string }> = {
-  completed: { label: "Ready", className: "border-emerald-200 bg-emerald-50 text-emerald-700" },
-  processing: { label: "Generating", className: "border-cyan-200 bg-cyan-50 text-cyan-700" },
-  queued: { label: "Queued", className: "border-amber-200 bg-amber-50 text-amber-700" },
-  retrying: { label: "Retrying", className: "border-amber-200 bg-amber-50 text-amber-700" },
-  error: { label: "Error", className: "border-red-200 bg-red-50 text-red-700" },
-  cancelled: { label: "Cancelled", className: "border-slate-200 bg-slate-50 text-slate-600" },
-};
 
 const extractYouTubeVideoId = (value: string): string | null => {
   const input = value.trim();
@@ -195,19 +183,6 @@ async function uploadVideoFile(file: File): Promise<string> {
   return uploadResult.video_path;
 }
 
-function TaskStatus({ status }: { status: string }) {
-  const config = statusCopy[status] || {
-    label: status,
-    className: "border-slate-200 bg-white text-slate-600",
-  };
-
-  return (
-    <span className={cn("inline-flex items-center rounded-md border px-2 py-1 text-xs font-bold", config.className)}>
-      {config.label}
-    </span>
-  );
-}
-
 function LandingOnly() {
   return (
     <div className="min-h-screen bg-white px-4 py-12">
@@ -265,13 +240,12 @@ function HomeContent() {
   const [pauseThresholdMs, setPauseThresholdMs] = useState("900");
   const [removeFillerWords, setRemoveFillerWords] = useState(false);
   const [filteredWords, setFilteredWords] = useState("");
-  const [workflows, setWorkflows] = useState<WorkflowPreset[]>([]);
-  const [selectedWorkflowId, setSelectedWorkflowId] = useState("none");
-  const [isLoadingLatest, setIsLoadingLatest] = useState(false);
+  const [presets, setPresets] = useState<Preset[]>([]);
+  const [selectedPresetId, setSelectedPresetId] = useState("none");
 
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
   const thumbnailUrl = sourceType === "youtube" ? getYouTubeThumbnailUrl(url) : null;
-  const selectedWorkflow = workflows.find((workflow) => workflow.id === selectedWorkflowId);
+  const selectedPreset = presets.find((preset) => preset.id === selectedPresetId);
   const sourceReady = sourceType === "youtube" ? Boolean(url.trim()) : Boolean(fileRef.current);
 
   useEffect(() => {
@@ -310,8 +284,8 @@ function HomeContent() {
     }
   }, []);
 
-  const applyWorkflowConfig = useCallback((workflow: WorkflowPreset) => {
-    const config = workflow.config || {};
+  const applyPresetConfig = useCallback((preset: Preset) => {
+    const config = preset.config || {};
     if (config.output_format) setOutputFormat(config.output_format);
     if (typeof config.add_subtitles === "boolean") setAddSubtitles(config.add_subtitles);
     if (typeof config.include_broll === "boolean") setIncludeBroll(config.include_broll);
@@ -333,28 +307,28 @@ function HomeContent() {
   useEffect(() => {
     if (!session?.user?.id) return;
 
-    const loadWorkflows = async () => {
+    const loadPresets = async () => {
       try {
         const response = await fetch("/api/workflows", { cache: "no-store" });
         if (!response.ok) return;
         const data = await response.json();
-        const nextWorkflows = (data.workflows || []) as WorkflowPreset[];
-        setWorkflows(nextWorkflows);
-        const requestedWorkflowId = searchParams.get("workflow");
-        const initialWorkflow =
-          nextWorkflows.find((workflow) => workflow.id === requestedWorkflowId) ||
-          nextWorkflows.find((workflow) => workflow.is_default);
-        if (initialWorkflow) {
-          setSelectedWorkflowId(initialWorkflow.id);
-          applyWorkflowConfig(initialWorkflow);
+        const nextPresets = (data.workflows || []) as Preset[];
+        setPresets(nextPresets);
+        const requestedPresetId = searchParams.get("preset") || searchParams.get("workflow");
+        const initialPreset =
+          nextPresets.find((preset) => preset.id === requestedPresetId) ||
+          nextPresets.find((preset) => preset.is_default);
+        if (initialPreset) {
+          setSelectedPresetId(initialPreset.id);
+          applyPresetConfig(initialPreset);
         }
-      } catch (workflowError) {
-        console.error("Failed to load workflows:", workflowError);
+      } catch (presetError) {
+        console.error("Failed to load presets:", presetError);
       }
     };
 
-    void loadWorkflows();
-  }, [applyWorkflowConfig, searchParams, session?.user?.id]);
+    void loadPresets();
+  }, [applyPresetConfig, searchParams, session?.user?.id]);
 
   useEffect(() => {
     if (isLandingOnlyModeEnabled) return;
@@ -417,10 +391,10 @@ function HomeContent() {
     setFileName(file?.name || null);
   };
 
-  const handleWorkflowChange = (workflowId: string) => {
-    setSelectedWorkflowId(workflowId);
-    const workflow = workflows.find((item) => item.id === workflowId);
-    if (workflow) applyWorkflowConfig(workflow);
+  const handlePresetChange = (presetId: string) => {
+    setSelectedPresetId(presetId);
+    const preset = presets.find((item) => item.id === presetId);
+    if (preset) applyPresetConfig(preset);
   };
 
   const handleTemplateChange = (templateId: string) => {
@@ -473,14 +447,14 @@ function HomeContent() {
           },
           caption_template: captionTemplate,
           include_broll: includeBroll,
-          processing_mode: selectedWorkflow?.config.processing_mode || "fast",
+          processing_mode: selectedPreset?.config.processing_mode || "fast",
           output_format: outputFormat,
           add_subtitles: addSubtitles,
           cut_long_pauses: cutLongPauses,
           pause_threshold_ms: normalizedPauseThreshold,
           remove_filler_words: removeFillerWords,
           filtered_words: normalizedFilteredWords,
-          workflow_id: selectedWorkflowId === "none" ? undefined : selectedWorkflowId,
+          workflow_id: selectedPresetId === "none" ? undefined : selectedPresetId,
         }),
       });
 
@@ -686,16 +660,16 @@ function HomeContent() {
 
             <div className="space-y-4">
               <div className="space-y-2">
-                <Label>Workflow</Label>
-                <Select value={selectedWorkflowId} onValueChange={handleWorkflowChange}>
+                <Label>Preset</Label>
+                <Select value={selectedPresetId} onValueChange={handlePresetChange}>
                   <SelectTrigger className="h-11 rounded-lg">
-                    <SelectValue placeholder="Default workflow" />
+                    <SelectValue placeholder="Default preset" />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">Default fast clips</SelectItem>
-                    {workflows.map((workflow) => (
-                      <SelectItem key={workflow.id} value={workflow.id}>
-                        {workflow.name}
+                    {presets.map((preset) => (
+                      <SelectItem key={preset.id} value={preset.id}>
+                        {preset.name}
                       </SelectItem>
                     ))}
                   </SelectContent>

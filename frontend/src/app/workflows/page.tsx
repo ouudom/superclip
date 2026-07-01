@@ -8,9 +8,12 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { useSession } from "@/lib/auth-client";
 import { formatSupportMessage, parseApiError } from "@/lib/api-error";
@@ -32,7 +35,24 @@ interface WorkflowDraft {
   source_type: string;
   output_target: string;
   is_default: boolean;
-  config_json: string;
+  processing_mode: string;
+  output_format: string;
+  add_subtitles: boolean;
+  include_broll: boolean;
+  cut_long_pauses: boolean;
+  pause_threshold_ms: string;
+  remove_filler_words: boolean;
+  filtered_words: string;
+  target_candidates: string;
+  platforms: string[];
+  transcribe_model_profile: string;
+  analyze_prompt_version: string;
+  review_manual: boolean;
+  render_profile: string;
+  caption_template: string;
+  font_family: string;
+  font_size: string;
+  font_color: string;
 }
 
 const EMPTY_DRAFT: WorkflowDraft = {
@@ -41,26 +61,24 @@ const EMPTY_DRAFT: WorkflowDraft = {
   source_type: "youtube",
   output_target: "shorts",
   is_default: false,
-  config_json: JSON.stringify(
-    {
-      processing_mode: "fast",
-      output_format: "vertical",
-      add_subtitles: true,
-      include_broll: false,
-      cut_long_pauses: false,
-      pause_threshold_ms: 900,
-      remove_filler_words: false,
-      target_candidates: 4,
-      steps: [
-        { key: "transcribe", model_profile: "default_transcription" },
-        { key: "analyze", prompt_version: "clip_candidates" },
-        { key: "review", manual: true },
-        { key: "render", render_profile: "final" },
-      ],
-    },
-    null,
-    2,
-  ),
+  processing_mode: "fast",
+  output_format: "vertical",
+  add_subtitles: true,
+  include_broll: false,
+  cut_long_pauses: false,
+  pause_threshold_ms: "900",
+  remove_filler_words: false,
+  filtered_words: "",
+  target_candidates: "4",
+  platforms: ["shorts", "reels", "tiktok"],
+  transcribe_model_profile: "default_transcription",
+  analyze_prompt_version: "clip_candidates",
+  review_manual: true,
+  render_profile: "final",
+  caption_template: "default",
+  font_family: "TikTokSans-Regular",
+  font_size: "24",
+  font_color: "#FFFFFF",
 };
 
 async function buildSupportError(response: Response, fallbackMessage: string) {
@@ -69,14 +87,63 @@ async function buildSupportError(response: Response, fallbackMessage: string) {
 }
 
 function draftFromWorkflow(workflow: Workflow): WorkflowDraft {
+  const config = workflow.config || {};
+  const steps = Array.isArray(config.steps) ? config.steps : [];
+  const stepConfig = (key: string) =>
+    steps.find((step) => typeof step === "object" && step && (step as { key?: unknown }).key === key) as
+      | Record<string, unknown>
+      | undefined;
+  const platforms = Array.isArray(config.platforms)
+    ? config.platforms.filter((platform): platform is string => typeof platform === "string")
+    : ["shorts", "reels", "tiktok"];
+
   return {
     name: workflow.name,
     description: workflow.description || "",
     source_type: workflow.source_type || "youtube",
     output_target: workflow.output_target || "shorts",
     is_default: workflow.is_default,
-    config_json: JSON.stringify(workflow.config || {}, null, 2),
+    processing_mode: typeof config.processing_mode === "string" ? config.processing_mode : "fast",
+    output_format: typeof config.output_format === "string" ? config.output_format : "vertical",
+    add_subtitles: typeof config.add_subtitles === "boolean" ? config.add_subtitles : true,
+    include_broll: typeof config.include_broll === "boolean" ? config.include_broll : false,
+    cut_long_pauses: typeof config.cut_long_pauses === "boolean" ? config.cut_long_pauses : false,
+    pause_threshold_ms:
+      typeof config.pause_threshold_ms === "number" ? String(config.pause_threshold_ms) : "900",
+    remove_filler_words:
+      typeof config.remove_filler_words === "boolean" ? config.remove_filler_words : false,
+    filtered_words: Array.isArray(config.filtered_words)
+      ? config.filtered_words.filter((word): word is string => typeof word === "string").join(", ")
+      : "",
+    target_candidates:
+      typeof config.target_candidates === "number" ? String(config.target_candidates) : "4",
+    platforms,
+    transcribe_model_profile:
+      typeof stepConfig("transcribe")?.model_profile === "string"
+        ? String(stepConfig("transcribe")?.model_profile)
+        : "default_transcription",
+    analyze_prompt_version:
+      typeof stepConfig("analyze")?.prompt_version === "string"
+        ? String(stepConfig("analyze")?.prompt_version)
+        : "clip_candidates",
+    review_manual:
+      typeof stepConfig("review")?.manual === "boolean" ? Boolean(stepConfig("review")?.manual) : true,
+    render_profile:
+      typeof stepConfig("render")?.render_profile === "string"
+        ? String(stepConfig("render")?.render_profile)
+        : "final",
+    caption_template: typeof config.caption_template === "string" ? config.caption_template : "default",
+    font_family: typeof config.font_family === "string" ? config.font_family : "TikTokSans-Regular",
+    font_size: typeof config.font_size === "number" ? String(config.font_size) : "24",
+    font_color: typeof config.font_color === "string" ? config.font_color : "#FFFFFF",
   };
+}
+
+function csvToWords(value: string) {
+  return value
+    .split(",")
+    .map((word) => word.trim().toLowerCase())
+    .filter(Boolean);
 }
 
 export default function WorkflowsPage() {
@@ -101,7 +168,7 @@ export default function WorkflowsPage() {
     try {
       const response = await fetch("/api/workflows", { cache: "no-store" });
       if (!response.ok) {
-        throw new Error(await buildSupportError(response, "Failed to load workflows"));
+        throw new Error(await buildSupportError(response, "Failed to load presets"));
       }
       const data = await response.json();
       const nextWorkflows = (data.workflows || []) as Workflow[];
@@ -111,7 +178,7 @@ export default function WorkflowsPage() {
         setDraft(draftFromWorkflow(nextWorkflows[0]));
       }
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "Failed to load workflows");
+      setError(loadError instanceof Error ? loadError.message : "Failed to load presets");
     } finally {
       setIsLoading(false);
     }
@@ -147,17 +214,61 @@ export default function WorkflowsPage() {
     });
   };
 
+  const buildConfig = () => {
+    const pauseThreshold = Number(draft.pause_threshold_ms);
+    const targetCandidates = Number(draft.target_candidates);
+    const fontSize = Number(draft.font_size);
+
+    if (!Number.isFinite(pauseThreshold) || pauseThreshold < 250 || pauseThreshold > 3000) {
+      throw new Error("Pause threshold must be 250-3000 ms.");
+    }
+    if (!Number.isFinite(targetCandidates) || targetCandidates < 1 || targetCandidates > 20) {
+      throw new Error("Target candidates must be 1-20.");
+    }
+    if (!Number.isFinite(fontSize) || fontSize < 12 || fontSize > 72) {
+      throw new Error("Font size must be 12-72.");
+    }
+
+    return {
+      ...(selectedWorkflow?.config || {}),
+      processing_mode: draft.processing_mode,
+      output_format: draft.output_format,
+      add_subtitles: draft.add_subtitles,
+      include_broll: draft.include_broll,
+      cut_long_pauses: draft.cut_long_pauses,
+      pause_threshold_ms: Math.round(pauseThreshold),
+      remove_filler_words: draft.remove_filler_words,
+      filtered_words: csvToWords(draft.filtered_words),
+      target_candidates: Math.round(targetCandidates),
+      caption_template: draft.caption_template,
+      font_family: draft.font_family,
+      font_size: Math.round(fontSize),
+      font_color: /^#[0-9A-Fa-f]{6}$/.test(draft.font_color) ? draft.font_color : "#FFFFFF",
+      steps: [
+        { key: "transcribe", model_profile: draft.transcribe_model_profile },
+        { key: "analyze", prompt_version: draft.analyze_prompt_version },
+        { key: "review", manual: draft.review_manual },
+        { key: "render", render_profile: draft.render_profile },
+      ],
+      platforms: draft.platforms,
+    };
+  };
+
+  const togglePlatform = (platform: string, checked: boolean) => {
+    setDraft((current) => ({
+      ...current,
+      platforms: checked
+        ? Array.from(new Set([...current.platforms, platform]))
+        : current.platforms.filter((item) => item !== platform),
+    }));
+  };
+
   const saveWorkflow = async () => {
     setIsSaving(true);
     setNotice(null);
     setError(null);
     try {
-      let config: Record<string, unknown>;
-      try {
-        config = JSON.parse(draft.config_json) as Record<string, unknown>;
-      } catch {
-        throw new Error("Config must be valid JSON.");
-      }
+      const config = buildConfig();
       const response = await fetch(
         selectedId ? `/api/workflows/${selectedId}` : "/api/workflows",
         {
@@ -174,15 +285,15 @@ export default function WorkflowsPage() {
         },
       );
       if (!response.ok) {
-        throw new Error(await buildSupportError(response, "Failed to save workflow"));
+        throw new Error(await buildSupportError(response, "Failed to save preset"));
       }
       const data = await response.json();
       await loadWorkflows();
       setSelectedId(data.workflow.id);
       setDraft(draftFromWorkflow(data.workflow));
-      setNotice("Workflow saved.");
+      setNotice("Preset saved.");
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : "Failed to save workflow");
+      setError(saveError instanceof Error ? saveError.message : "Failed to save preset");
     } finally {
       setIsSaving(false);
     }
@@ -195,22 +306,22 @@ export default function WorkflowsPage() {
     try {
       const response = await fetch(`/api/workflows/${selectedId}`, { method: "DELETE" });
       if (!response.ok) {
-        throw new Error(await buildSupportError(response, "Failed to delete workflow"));
+        throw new Error(await buildSupportError(response, "Failed to delete preset"));
       }
       setSelectedId(null);
       setDraft({ ...EMPTY_DRAFT });
       await loadWorkflows();
-      setNotice("Workflow deleted.");
+      setNotice("Preset deleted.");
     } catch (deleteError) {
-      setError(deleteError instanceof Error ? deleteError.message : "Failed to delete workflow");
+      setError(deleteError instanceof Error ? deleteError.message : "Failed to delete preset");
     } finally {
       setIsSaving(false);
     }
   };
 
-  if (isPending || isLoading) {
+  if (isPending) {
     return (
-      <StudioShell title="Workflows" subtitle="Load presets">
+      <StudioShell title="Presets" subtitle="Load presets">
         <div className="space-y-4">
           <Skeleton className="h-10 w-52" />
           <Skeleton className="h-48 w-full" />
@@ -222,7 +333,7 @@ export default function WorkflowsPage() {
 
   if (!session?.user) {
     return (
-      <StudioShell title="Workflows" subtitle="Sign in to manage presets">
+      <StudioShell title="Presets" subtitle="Sign in to manage presets">
         <div className="mx-auto max-w-lg rounded-lg border border-slate-200 bg-white p-8 text-center shadow-sm">
           <h1 className="mb-4 font-[var(--font-syne)] text-2xl font-bold text-slate-950">Sign in required</h1>
           <Link href="/sign-in">
@@ -233,11 +344,23 @@ export default function WorkflowsPage() {
     );
   }
 
+  if (isLoading) {
+    return (
+      <StudioShell title="Presets" subtitle="Load presets">
+        <div className="space-y-4">
+          <Skeleton className="h-10 w-52" />
+          <Skeleton className="h-48 w-full" />
+          <Skeleton className="h-48 w-full" />
+        </div>
+      </StudioShell>
+    );
+  }
+
   return (
     <StudioShell
-      title="Workflows"
+      title="Presets"
       subtitle="Save repeatable source-to-candidate patterns with model, prompt, and render settings."
-      actions={<Button onClick={createNew} className="bg-slate-950 hover:bg-slate-800">New workflow</Button>}
+      actions={<Button onClick={createNew} className="bg-slate-950 hover:bg-slate-800">New preset</Button>}
     >
 
       <main className="grid gap-5 lg:grid-cols-[320px_minmax(0,1fr)]">
@@ -281,7 +404,7 @@ export default function WorkflowsPage() {
                 <Input
                   value={draft.name}
                   onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))}
-                  placeholder="Workflow name"
+                  placeholder="Preset name"
                 />
                 <div className="grid grid-cols-2 gap-3">
                   <Select
@@ -319,12 +442,203 @@ export default function WorkflowsPage() {
                 placeholder="Description"
                 className="min-h-20"
               />
-              <Textarea
-                value={draft.config_json}
-                onChange={(event) => setDraft((current) => ({ ...current, config_json: event.target.value }))}
-                className="min-h-[360px] font-mono text-xs"
-                spellCheck={false}
-              />
+              <div className="grid gap-4 xl:grid-cols-2">
+                <section className="space-y-4 rounded-lg border border-slate-200 bg-slate-50 p-4">
+                  <div>
+                    <h2 className="text-sm font-bold text-slate-950">Generation</h2>
+                    <p className="text-xs text-slate-500">Candidate search and output defaults.</p>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label>Mode</Label>
+                      <Select
+                        value={draft.processing_mode}
+                        onValueChange={(value) => setDraft((current) => ({ ...current, processing_mode: value }))}
+                      >
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="fast">Fast</SelectItem>
+                          <SelectItem value="balanced">Balanced</SelectItem>
+                          <SelectItem value="quality">Quality</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Format</Label>
+                      <Select
+                        value={draft.output_format}
+                        onValueChange={(value) => setDraft((current) => ({ ...current, output_format: value }))}
+                      >
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="vertical">Vertical</SelectItem>
+                          <SelectItem value="vertical_pan">Vertical pan</SelectItem>
+                          <SelectItem value="vertical_split">Split screen</SelectItem>
+                          <SelectItem value="original">Original</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Target clips</Label>
+                      <Input
+                        type="number"
+                        min={1}
+                        max={20}
+                        value={draft.target_candidates}
+                        onChange={(event) => setDraft((current) => ({ ...current, target_candidates: event.target.value }))}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Caption style</Label>
+                      <Input
+                        value={draft.caption_template}
+                        onChange={(event) => setDraft((current) => ({ ...current, caption_template: event.target.value }))}
+                      />
+                    </div>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    {["shorts", "reels", "tiktok"].map((platform) => (
+                      <label key={platform} className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold capitalize text-slate-700">
+                        <Checkbox
+                          checked={draft.platforms.includes(platform)}
+                          onCheckedChange={(checked) => togglePlatform(platform, Boolean(checked))}
+                        />
+                        {platform}
+                      </label>
+                    ))}
+                  </div>
+                </section>
+
+                <section className="space-y-4 rounded-lg border border-slate-200 bg-slate-50 p-4">
+                  <div>
+                    <h2 className="text-sm font-bold text-slate-950">Cleanup</h2>
+                    <p className="text-xs text-slate-500">Captions, pauses, filler words, and B-roll.</p>
+                  </div>
+                  <div className="space-y-3">
+                    <label className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2">
+                      <span className="text-sm font-semibold text-slate-700">Add subtitles</span>
+                      <Switch
+                        checked={draft.add_subtitles}
+                        onCheckedChange={(checked) => setDraft((current) => ({ ...current, add_subtitles: checked }))}
+                      />
+                    </label>
+                    <label className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2">
+                      <span className="text-sm font-semibold text-slate-700">Include B-roll</span>
+                      <Switch
+                        checked={draft.include_broll}
+                        onCheckedChange={(checked) => setDraft((current) => ({ ...current, include_broll: checked }))}
+                      />
+                    </label>
+                    <label className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700">
+                      <Checkbox
+                        checked={draft.cut_long_pauses}
+                        onCheckedChange={(checked) => setDraft((current) => ({ ...current, cut_long_pauses: Boolean(checked) }))}
+                      />
+                      Cut long pauses
+                    </label>
+                    {draft.cut_long_pauses && (
+                      <div className="space-y-2">
+                        <Label>Pause threshold ms</Label>
+                        <Input
+                          type="number"
+                          min={250}
+                          max={3000}
+                          step={50}
+                          value={draft.pause_threshold_ms}
+                          onChange={(event) => setDraft((current) => ({ ...current, pause_threshold_ms: event.target.value }))}
+                        />
+                      </div>
+                    )}
+                    <label className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700">
+                      <Checkbox
+                        checked={draft.remove_filler_words}
+                        onCheckedChange={(checked) => setDraft((current) => ({ ...current, remove_filler_words: Boolean(checked) }))}
+                      />
+                      Remove filler words
+                    </label>
+                    {draft.remove_filler_words && (
+                      <Textarea
+                        value={draft.filtered_words}
+                        onChange={(event) => setDraft((current) => ({ ...current, filtered_words: event.target.value }))}
+                        placeholder="basically, literally, to be honest"
+                        className="min-h-20"
+                      />
+                    )}
+                  </div>
+                </section>
+
+                <section className="space-y-4 rounded-lg border border-slate-200 bg-slate-50 p-4">
+                  <div>
+                    <h2 className="text-sm font-bold text-slate-950">Pipeline</h2>
+                    <p className="text-xs text-slate-500">Model, prompt, review, and render profiles.</p>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label>Transcribe profile</Label>
+                      <Input
+                        value={draft.transcribe_model_profile}
+                        onChange={(event) => setDraft((current) => ({ ...current, transcribe_model_profile: event.target.value }))}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Analyze prompt</Label>
+                      <Input
+                        value={draft.analyze_prompt_version}
+                        onChange={(event) => setDraft((current) => ({ ...current, analyze_prompt_version: event.target.value }))}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Render profile</Label>
+                      <Input
+                        value={draft.render_profile}
+                        onChange={(event) => setDraft((current) => ({ ...current, render_profile: event.target.value }))}
+                      />
+                    </div>
+                    <label className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2">
+                      <span className="text-sm font-semibold text-slate-700">Manual review</span>
+                      <Switch
+                        checked={draft.review_manual}
+                        onCheckedChange={(checked) => setDraft((current) => ({ ...current, review_manual: checked }))}
+                      />
+                    </label>
+                  </div>
+                </section>
+
+                <section className="space-y-4 rounded-lg border border-slate-200 bg-slate-50 p-4">
+                  <div>
+                    <h2 className="text-sm font-bold text-slate-950">Caption Look</h2>
+                    <p className="text-xs text-slate-500">Default text styling for generated clips.</p>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_96px_96px]">
+                    <div className="space-y-2">
+                      <Label>Font</Label>
+                      <Input
+                        value={draft.font_family}
+                        onChange={(event) => setDraft((current) => ({ ...current, font_family: event.target.value }))}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Size</Label>
+                      <Input
+                        type="number"
+                        min={12}
+                        max={72}
+                        value={draft.font_size}
+                        onChange={(event) => setDraft((current) => ({ ...current, font_size: event.target.value }))}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Color</Label>
+                      <input
+                        type="color"
+                        value={draft.font_color}
+                        onChange={(event) => setDraft((current) => ({ ...current, font_color: event.target.value }))}
+                        className="h-10 w-full rounded-md border border-slate-200 bg-white p-1"
+                      />
+                    </div>
+                  </div>
+                </section>
+              </div>
               <div className="flex flex-wrap justify-between gap-2">
                 <div className="flex flex-wrap gap-2">
                   <Button
@@ -339,10 +653,10 @@ export default function WorkflowsPage() {
                     Duplicate
                   </Button>
                   {selectedWorkflow && (
-                    <Link href={`/?workflow=${selectedWorkflow.id}`}>
+                    <Link href={`/?preset=${selectedWorkflow.id}`}>
                       <Button variant="outline">
                         <Play className="h-4 w-4" />
-                        Use
+                        Use preset
                       </Button>
                     </Link>
                   )}
