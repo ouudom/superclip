@@ -11,7 +11,7 @@ import uuid
 import aiofiles
 
 from ...config import get_config
-from ...database import get_db
+from ...database import AsyncSessionLocal, get_db
 from ...auth_headers import resolve_authenticated_user_id
 from ...font_registry import (
     FONTS_DIR,
@@ -84,12 +84,11 @@ async def get_available_fonts_route(
 
 
 @router.get("/fonts/{font_name}")
-async def get_font_file(
-    font_name: str, request: Request, db: AsyncSession = Depends(get_db)
-):
+async def get_font_file(font_name: str, request: Request):
     """Serve a specific font file."""
     try:
-        user_id = await _get_authenticated_user_id(request, db)
+        async with AsyncSessionLocal() as db:
+            user_id = await _get_authenticated_user_id(request, db)
         font_path = find_font_path(font_name, user_id=user_id)
 
         if not font_path:

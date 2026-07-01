@@ -446,14 +446,15 @@ async def get_task_clips(
 
 
 @router.get("/{task_id}/source-file")
-async def get_task_source_file(
-    task_id: str, request: Request, db: AsyncSession = Depends(get_db)
-):
+async def get_task_source_file(task_id: str, request: Request):
     """Serve downloaded source video for candidate review."""
     try:
-        task_service = TaskService(db)
-        await _require_task_owner(request, task_service, db, task_id)
-        artifacts = await task_service.artifact_repo.get_artifacts_by_task(db, task_id)
+        async with AsyncSessionLocal() as db:
+            task_service = TaskService(db)
+            await _require_task_owner(request, task_service, db, task_id)
+            artifacts = await task_service.artifact_repo.get_artifacts_by_task(
+                db, task_id
+            )
         video_artifact = artifacts.get("video_path") or {}
         video_path = video_artifact.get("file_path")
         if not video_path:
@@ -651,14 +652,13 @@ async def delete_clip(
 
 
 @router.get("/{task_id}/clips/{clip_id}/file")
-async def get_clip_file(
-    task_id: str, clip_id: str, request: Request, db: AsyncSession = Depends(get_db)
-):
+async def get_clip_file(task_id: str, clip_id: str, request: Request):
     """Serve a clip file after verifying task ownership."""
     try:
-        task_service = TaskService(db)
-        await _require_task_owner(request, task_service, db, task_id)
-        clip = await task_service.clip_repo.get_clip_by_id(db, clip_id)
+        async with AsyncSessionLocal() as db:
+            task_service = TaskService(db)
+            await _require_task_owner(request, task_service, db, task_id)
+            clip = await task_service.clip_repo.get_clip_by_id(db, clip_id)
         if not clip or clip.get("task_id") != task_id:
             raise HTTPException(status_code=404, detail="Clip not found")
 
@@ -896,7 +896,6 @@ async def export_clip(
     clip_id: str,
     request: Request,
     preset: str = "tiktok",
-    db: AsyncSession = Depends(get_db),
 ):
     """Export clip with a social platform preset."""
     try:
@@ -907,9 +906,10 @@ async def export_clip(
                 detail=f"Invalid preset. Use one of: {', '.join(EXPORT_PRESETS.keys())}",
             )
 
-        task_service = TaskService(db)
-        await _require_task_owner(request, task_service, db, task_id)
-        clip = await task_service.clip_repo.get_clip_by_id(db, clip_id)
+        async with AsyncSessionLocal() as db:
+            task_service = TaskService(db)
+            await _require_task_owner(request, task_service, db, task_id)
+            clip = await task_service.clip_repo.get_clip_by_id(db, clip_id)
         if not clip or clip.get("task_id") != task_id:
             raise HTTPException(status_code=404, detail="Clip not found")
 
