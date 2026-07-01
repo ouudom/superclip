@@ -39,15 +39,6 @@ import { cn } from "@/lib/utils";
 type SourceType = "youtube" | "upload";
 type OutputFormat = "vertical" | "vertical_pan" | "vertical_split" | "original";
 
-interface LatestTask {
-  id: string;
-  source_title: string;
-  source_type: string;
-  status: string;
-  clips_count: number;
-  created_at: string;
-}
-
 interface FontOption {
   name: string;
   display_name: string;
@@ -276,7 +267,6 @@ function HomeContent() {
   const [filteredWords, setFilteredWords] = useState("");
   const [workflows, setWorkflows] = useState<WorkflowPreset[]>([]);
   const [selectedWorkflowId, setSelectedWorkflowId] = useState("none");
-  const [latestTask, setLatestTask] = useState<LatestTask | null>(null);
   const [isLoadingLatest, setIsLoadingLatest] = useState(false);
 
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -413,22 +403,7 @@ function HomeContent() {
       }
     };
 
-    const loadLatestTask = async () => {
-      try {
-        setIsLoadingLatest(true);
-        const response = await fetch("/api/tasks/", { cache: "no-store" });
-        if (!response.ok) return;
-        const data = await response.json();
-        setLatestTask((data.tasks || [])[0] || null);
-      } catch (latestError) {
-        console.error("Failed to load latest task:", latestError);
-      } finally {
-        setIsLoadingLatest(false);
-      }
-    };
-
     void loadPreferences();
-    void loadLatestTask();
   }, [session?.user?.id]);
 
   const sourceSummary = useMemo(() => {
@@ -708,12 +683,6 @@ function HomeContent() {
 
         <aside className="space-y-6">
           <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-            <div className="mb-5 flex items-center justify-between">
-              <h2 className="font-[var(--font-syne)] text-xl font-bold text-slate-950">Current settings</h2>
-              <Badge variant="outline" className="border-cyan-200 bg-cyan-50 text-cyan-700">
-                Backend-safe
-              </Badge>
-            </div>
 
             <div className="space-y-4">
               <div className="space-y-2">
@@ -861,48 +830,6 @@ function HomeContent() {
                 {!isLoading && <ArrowRight className="h-4 w-4" />}
               </Button>
             </div>
-          </div>
-
-          <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-            <div className="flex items-center justify-between">
-              <h2 className="font-[var(--font-syne)] text-xl font-bold text-slate-950">Latest project</h2>
-              <Clock3 className="h-4 w-4 text-slate-400" />
-            </div>
-            {isLoadingLatest ? (
-              <div className="mt-4 space-y-2">
-                <Skeleton className="h-4 w-2/3" />
-                <Skeleton className="h-4 w-1/2" />
-              </div>
-            ) : latestTask ? (
-              <Link
-                href={`/tasks/${latestTask.id}`}
-                className="mt-4 block rounded-lg border border-slate-200 bg-slate-50 p-4 transition hover:border-cyan-300 hover:bg-cyan-50/40"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-bold text-slate-950">{latestTask.source_title}</p>
-                    <p className="mt-1 text-xs text-slate-500">
-                      {latestTask.clips_count} clips · {new Date(latestTask.created_at).toLocaleDateString()}
-                    </p>
-                  </div>
-                  <TaskStatus status={latestTask.status} />
-                </div>
-              </Link>
-            ) : (
-              <div className="mt-4 rounded-lg border border-dashed border-slate-200 p-4 text-sm text-slate-500">
-                No backend tasks yet.
-              </div>
-            )}
-          </div>
-
-          <div className="rounded-lg border border-lime-200 bg-lime-50 p-5">
-            <div className="flex items-center gap-2 text-sm font-bold text-lime-800">
-              <CheckCircle2 className="h-4 w-4" />
-              Download only
-            </div>
-            <p className="mt-2 text-sm leading-6 text-slate-600">
-              Exports stay local to the app. No social publishing setup needed.
-            </p>
           </div>
         </aside>
       </form>

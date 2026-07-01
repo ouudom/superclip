@@ -90,16 +90,6 @@ function StudioSidebar({ onNavigate }: { onNavigate?: () => void }) {
         })}
       </nav>
 
-      <div className="mt-8 rounded-lg border border-lime-200 bg-lime-50 p-4">
-        <div className="flex items-center gap-2 text-sm font-bold text-slate-950">
-          <Sparkles className="h-4 w-4 text-lime-600" />
-          Repurpose fast
-        </div>
-        <p className="mt-2 text-xs leading-5 text-slate-600">
-          Drop a long video. Keep the best moments. Download vertical clips.
-        </p>
-      </div>
-
       <div className="mt-auto border-t border-slate-200 pt-4">
         {!mounted ? (
           <div className="h-[60px] rounded-lg bg-slate-50" />
@@ -188,7 +178,6 @@ export function StudioShell({
             </div>
             <div className="flex items-center gap-2">
               {actions}
-              <UserCircle className="hidden h-5 w-5 text-slate-300 sm:block" />
             </div>
           </div>
         </header>
