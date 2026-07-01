@@ -11,6 +11,7 @@ import {
   LogOut,
   Menu,
   PackageOpen,
+  PlusCircle,
   Settings,
   Workflow,
   X,
@@ -22,7 +23,7 @@ import { signOut, useSession } from "@/lib/auth-client";
 import { cn } from "@/lib/utils";
 
 const navItems = [
-  { href: "/", label: "Create", icon: Home },
+  { href: "/", label: "Create", icon: PlusCircle },
   { href: "/list", label: "Projects", icon: FolderOpen },
   { href: "/library", label: "Clips", icon: Film },
   { href: "/sources", label: "Sources", icon: PackageOpen },
