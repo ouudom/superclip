@@ -29,7 +29,6 @@ from .models import User, Task, Source, GeneratedClip
 from .database import init_db, close_db, get_db, AsyncSessionLocal
 from .auth_headers import get_authenticated_user_id as get_backend_user_id
 from .api.routes.tasks import router as tasks_router
-from .api.routes.agents import router as agents_router
 from .api.routes.feedback import router as feedback_router
 from .api.routes.publishing import router as publishing_router
 from .api.routes.sources import router as sources_router
@@ -72,7 +71,6 @@ app.add_middleware(
 
 # Include API routers
 app.include_router(tasks_router)
-app.include_router(agents_router)
 app.include_router(sources_router)
 app.include_router(publishing_router)
 app.include_router(workflows_router)

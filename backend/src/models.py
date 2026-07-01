@@ -59,12 +59,6 @@ class User(Base):
     tasks: Mapped[List["Task"]] = relationship(
         "Task", back_populates="user", cascade="all, delete-orphan"
     )
-    agent_tasks: Mapped[List["AgentTask"]] = relationship(
-        "AgentTask", back_populates="user", cascade="all, delete-orphan"
-    )
-    agent_runs: Mapped[List["AgentRun"]] = relationship(
-        "AgentRun", back_populates="user", cascade="all, delete-orphan"
-    )
 
 
 class AppSetting(Base):
@@ -285,12 +279,6 @@ class Task(Base):
     library_metadata: Mapped[Optional["TaskLibraryMetadata"]] = relationship(
         "TaskLibraryMetadata", back_populates="task", cascade="all, delete-orphan"
     )
-    agent_tasks: Mapped[List["AgentTask"]] = relationship(
-        "AgentTask", back_populates="task", cascade="all, delete-orphan"
-    )
-    agent_runs: Mapped[List["AgentRun"]] = relationship(
-        "AgentRun", back_populates="task", cascade="all, delete-orphan"
-    )
 
 
 class Source(Base):
@@ -507,98 +495,3 @@ class TaskArtifact(Base):
         ),
     )
 
-
-class AgentTask(Base):
-    __tablename__ = "agent_tasks"
-
-    id: Mapped[str] = mapped_column(
-        String(36), primary_key=True, default=generate_uuid_string
-    )
-    user_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
-    )
-    task_id: Mapped[Optional[str]] = mapped_column(
-        String(36), ForeignKey("tasks.id", ondelete="CASCADE"), nullable=True
-    )
-    title: Mapped[str] = mapped_column(String(180), nullable=False)
-    agent_type: Mapped[str] = mapped_column(
-        String(60), nullable=False, server_default=sql_text("'codex'")
-    )
-    status: Mapped[str] = mapped_column(
-        String(40), nullable=False, server_default=sql_text("'draft'")
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
-    )
-
-    user: Mapped["User"] = relationship("User", back_populates="agent_tasks")
-    task: Mapped[Optional["Task"]] = relationship("Task", back_populates="agent_tasks")
-    runs: Mapped[List["AgentRun"]] = relationship(
-        "AgentRun", back_populates="agent_task", cascade="all, delete-orphan"
-    )
-
-
-class AgentRun(Base):
-    __tablename__ = "agent_runs"
-
-    id: Mapped[str] = mapped_column(
-        String(36), primary_key=True, default=generate_uuid_string
-    )
-    agent_task_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("agent_tasks.id", ondelete="CASCADE"), nullable=False
-    )
-    user_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
-    )
-    task_id: Mapped[Optional[str]] = mapped_column(
-        String(36), ForeignKey("tasks.id", ondelete="CASCADE"), nullable=True
-    )
-    agent_key: Mapped[str] = mapped_column(String(80), nullable=False)
-    status: Mapped[str] = mapped_column(
-        String(40), nullable=False, server_default=sql_text("'draft'")
-    )
-    prompt_text: Mapped[str] = mapped_column(Text, nullable=False)
-    context_json: Mapped[dict] = mapped_column(
-        JSONB, nullable=False, server_default=sql_text("'{}'::jsonb")
-    )
-    output_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
-    )
-
-    agent_task: Mapped["AgentTask"] = relationship("AgentTask", back_populates="runs")
-    user: Mapped["User"] = relationship("User", back_populates="agent_runs")
-    task: Mapped[Optional["Task"]] = relationship("Task", back_populates="agent_runs")
-    artifacts: Mapped[List["AgentArtifact"]] = relationship(
-        "AgentArtifact", back_populates="agent_run", cascade="all, delete-orphan"
-    )
-
-
-class AgentArtifact(Base):
-    __tablename__ = "agent_artifacts"
-
-    id: Mapped[str] = mapped_column(
-        String(36), primary_key=True, default=generate_uuid_string
-    )
-    agent_run_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("agent_runs.id", ondelete="CASCADE"), nullable=False
-    )
-    artifact_type: Mapped[str] = mapped_column(String(60), nullable=False)
-    text_value: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    json_value: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
-    file_path: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
-    )
-
-    agent_run: Mapped["AgentRun"] = relationship("AgentRun", back_populates="artifacts")

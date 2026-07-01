@@ -46,8 +46,6 @@ model User {
   model_profiles ModelProfile[] @relation("UserModelProfiles")
   prompt_versions PromptVersion[] @relation("UserPromptVersions")
   workflows      Workflow[]     @relation("UserWorkflows")
-  agent_tasks    AgentTask[]
-  agent_runs     AgentRun[]
 
   @@map("users")
 }
@@ -174,8 +172,6 @@ model Task {
   source               Source?   @relation(fields: [source_id], references: [id], onDelete: SetNull)
   artifacts            TaskArtifact[]
   library_metadata     TaskLibraryMetadata?
-  agent_tasks          AgentTask[]
-  agent_runs           AgentRun[]
   generated_clips      GeneratedClip[]
   publish_metadata     ClipPublishMetadata[]
 
@@ -229,72 +225,6 @@ model TaskArtifact {
   @@index([artifact_type])
   @@index([file_path])
   @@map("task_artifacts")
-}
-
-model AgentTask {
-  id         String   @id @default(uuid())
-  user_id    String   @db.VarChar(36)
-  task_id    String?  @db.VarChar(36)
-  title      String   @db.VarChar(180)
-  agent_type String   @default("codex") @db.VarChar(60)
-  status     String   @default("draft") @db.VarChar(40)
-  created_at DateTime @default(now()) @db.Timestamptz
-  updated_at DateTime @default(now()) @updatedAt @db.Timestamptz
-
-  user       User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
-  task       Task?    @relation(fields: [task_id], references: [id], onDelete: Cascade)
-  runs       AgentRun[]
-
-  @@index([user_id])
-  @@index([task_id])
-  @@index([status])
-  @@index([created_at])
-  @@map("agent_tasks")
-}
-
-model AgentRun {
-  id             String          @id @default(uuid())
-  agent_task_id  String          @db.VarChar(36)
-  user_id        String          @db.VarChar(36)
-  task_id        String?         @db.VarChar(36)
-  agent_key      String          @db.VarChar(80)
-  status         String          @default("draft") @db.VarChar(40)
-  prompt_text    String
-  context_json   Json            @default("{}")
-  output_text    String?
-  error_message  String?
-  created_at     DateTime        @default(now()) @db.Timestamptz
-  updated_at     DateTime        @default(now()) @updatedAt @db.Timestamptz
-
-  agent_task     AgentTask       @relation(fields: [agent_task_id], references: [id], onDelete: Cascade)
-  user           User            @relation(fields: [user_id], references: [id], onDelete: Cascade)
-  task           Task?           @relation(fields: [task_id], references: [id], onDelete: Cascade)
-  artifacts      AgentArtifact[]
-
-  @@index([agent_task_id])
-  @@index([user_id])
-  @@index([task_id])
-  @@index([agent_key])
-  @@index([status])
-  @@index([created_at])
-  @@map("agent_runs")
-}
-
-model AgentArtifact {
-  id            String   @id @default(uuid())
-  agent_run_id  String   @db.VarChar(36)
-  artifact_type String   @db.VarChar(60)
-  text_value    String?
-  json_value    Json?
-  file_path     String?
-  created_at    DateTime @default(now()) @db.Timestamptz
-  updated_at    DateTime @default(now()) @updatedAt @db.Timestamptz
-
-  agent_run     AgentRun @relation(fields: [agent_run_id], references: [id], onDelete: Cascade)
-
-  @@index([agent_run_id])
-  @@index([artifact_type])
-  @@map("agent_artifacts")
 }
 
 model Source {

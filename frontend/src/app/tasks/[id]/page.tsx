@@ -914,7 +914,7 @@ export default function TaskPage() {
         )}
 
         {task.status === "analysis_ready" && (
-          <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
+          <section className="grid gap-6 xl:grid-cols-[minmax(0,2fr)_minmax(360px,1fr)]">
             <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
               <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
                 <div>
@@ -1137,14 +1137,14 @@ export default function TaskPage() {
                 {clips.map((clip) => (
                   <div
                     key={clip.id}
-                    className="grid gap-6 rounded-lg border border-slate-200 bg-white p-5 shadow-sm xl:grid-cols-[320px_minmax(0,1fr)]"
+                    className="grid gap-6 rounded-lg border border-slate-200 bg-white p-5 shadow-sm xl:grid-cols-[minmax(360px,1fr)_minmax(0,2fr)]"
                   >
                     <div className="rounded-lg bg-slate-950 p-3">
                       <div className="flex justify-center rounded-lg bg-black">
                         <DynamicVideoPlayer
                           src={getClipUrl(clip.video_url)}
                           poster="/placeholder-video.jpg"
-                          height="min(64vh, 520px)"
+                          height="min(70vh, 640px)"
                         />
                       </div>
                     </div>

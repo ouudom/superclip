@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
-  Bot,
   Clapperboard,
   Download,
   Film,
@@ -13,9 +12,7 @@ import {
   Menu,
   PackageOpen,
   Settings,
-  Sparkles,
   Workflow,
-  UserCircle,
   X,
 } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -30,7 +27,6 @@ const navItems = [
   { href: "/library", label: "Clips", icon: Film },
   { href: "/sources", label: "Sources", icon: PackageOpen },
   { href: "/workflows", label: "Workflows", icon: Workflow },
-  { href: "/agents", label: "Agents", icon: Bot },
   { href: "/publishing", label: "Exports", icon: Download },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
