@@ -1050,12 +1050,12 @@ export default function TaskPage() {
                 <p className="mt-1 text-sm text-slate-500">
                   Starts at {formatDuration(previewStartSeconds)}.
                 </p>
-                <div className="mt-4 overflow-hidden rounded-lg bg-slate-950">
+                <div className="mt-4 flex justify-center overflow-hidden rounded-lg bg-slate-950">
                   <video
                     key={previewStartSeconds}
                     controls
                     preload="metadata"
-                    className="aspect-video w-full object-contain"
+                    className="block h-auto max-h-[70vh] max-w-full object-contain"
                   >
                     <source src={getSourcePreviewUrl()} type="video/mp4" />
                   </video>
