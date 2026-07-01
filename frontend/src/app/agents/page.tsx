@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, Bot, Copy, Database, FileText, Save } from "lucide-react";
+import { Bot, Copy, Database, FileText, Save } from "lucide-react";
+import { StudioShell } from "@/components/studio-shell";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -193,52 +194,36 @@ export default function AgentsPage() {
 
   if (isPending || isLoading) {
     return (
-      <main className="min-h-screen bg-stone-50 p-6">
-        <div className="mx-auto max-w-6xl space-y-4">
+      <StudioShell title="Agents" subtitle="Load workspace">
+        <div className="space-y-4">
           <Skeleton className="h-10 w-48" />
           <Skeleton className="h-48 w-full" />
           <Skeleton className="h-96 w-full" />
         </div>
-      </main>
+      </StudioShell>
     );
   }
 
   if (!session?.user) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-stone-50 p-6">
-        <Card className="max-w-md">
-          <CardContent className="space-y-4 p-6">
-            <p className="text-sm text-stone-600">Sign in to use agent workspace.</p>
-            <Link href="/sign-in">
-              <Button>Sign in</Button>
-            </Link>
-          </CardContent>
-        </Card>
-      </main>
+      <StudioShell title="Agents" subtitle="Sign in to use agent workspace">
+        <div className="mx-auto max-w-lg rounded-lg border border-slate-200 bg-white p-8 text-center shadow-sm">
+          <p className="mb-4 text-sm text-slate-600">Sign in to use agent workspace.</p>
+          <Link href="/sign-in">
+            <Button className="bg-slate-950 hover:bg-slate-800">Sign in</Button>
+          </Link>
+        </div>
+      </StudioShell>
     );
   }
 
   return (
-    <main className="min-h-screen bg-stone-50 text-stone-950">
-      <div className="mx-auto max-w-7xl px-6 py-6">
-        <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <Link href="/">
-              <Button variant="outline" size="sm">
-                <ArrowLeft className="mr-2 h-4 w-4" />
-                Home
-              </Button>
-            </Link>
-            <div>
-              <h1 className="text-2xl font-semibold">Agent Workspace</h1>
-              <p className="text-sm text-stone-500">Codex/Claude handoff prompts with saved task context.</p>
-            </div>
-          </div>
-          <Badge variant="outline" className="gap-1">
-            <Database className="h-3.5 w-3.5" />
-            local
-          </Badge>
-        </div>
+    <StudioShell
+      title="Agents"
+      subtitle="Codex/Claude handoff prompts with saved task context."
+      actions={<Badge variant="outline" className="gap-1 bg-white"><Database className="h-3.5 w-3.5" />local</Badge>}
+    >
+      <main className="space-y-6">
 
         {error && (
           <Alert variant="destructive" className="mb-4">
@@ -377,7 +362,7 @@ export default function AgentsPage() {
             </Card>
           </section>
         </div>
-      </div>
-    </main>
+      </main>
+    </StudioShell>
   );
 }

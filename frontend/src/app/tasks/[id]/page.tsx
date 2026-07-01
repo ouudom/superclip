@@ -1,16 +1,37 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { Card, CardContent } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Skeleton } from "@/components/ui/skeleton";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  AlertCircle,
+  ArrowLeft,
+  Check,
+  CheckCircle2,
+  Clock3,
+  Download,
+  Edit2,
+  Film,
+  Loader2,
+  Play,
+  RefreshCw,
+  Scissors,
+  Sparkles,
+  Star,
+  Trash2,
+  X,
+  Zap,
+} from "lucide-react";
+
+import DynamicVideoPlayer from "@/components/dynamic-video-player";
+import { StudioShell } from "@/components/studio-shell";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import { Progress } from "@/components/ui/progress";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -21,44 +42,9 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-  SheetDescription,
-  SheetFooter,
-} from "@/components/ui/sheet";
-import { useSession } from "@/lib/auth-client";
 import { formatSupportMessage, parseApiError } from "@/lib/api-error";
-import {
-  ArrowLeft,
-  Download,
-  Star,
-  AlertCircle,
-  Trash2,
-  Edit2,
-  X,
-  Check,
-  Zap,
-  MessageSquare,
-  TrendingUp,
-  Share2,
-  Clock,
-  Scissors,
-  SplitSquareVertical,
-  GitMerge,
-  RefreshCw,
-  Subtitles,
-  Settings2,
-  Type,
-  Clapperboard,
-  Play,
-} from "lucide-react";
-import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@/components/ui/tooltip";
-import { Progress } from "@/components/ui/progress";
-import Link from "next/link";
-import DynamicVideoPlayer from "@/components/dynamic-video-player";
+import { useSession } from "@/lib/auth-client";
+import { cn } from "@/lib/utils";
 
 interface Clip {
   id: string;
@@ -73,7 +59,6 @@ interface Clip {
   clip_order: number;
   created_at: string;
   video_url: string;
-  // Virality scores
   virality_score: number;
   hook_score: number;
   engagement_score: number;
@@ -97,10 +82,9 @@ interface ClipCandidate {
   hook_type?: string | null;
 }
 
-type EditableClipCandidate = ClipCandidate & {
-  text: string;
-  reasoning: string;
-};
+type StageKey = "queue" | "download" | "transcribe" | "analyze" | "render" | "complete";
+type StageState = "pending" | "active" | "done" | "failed";
+type StagePayload = Partial<Record<StageKey, { state?: StageState; progress?: number | null }>>;
 
 interface TaskDetails {
   id: string;
@@ -128,25 +112,7 @@ interface TaskDetails {
   clip_candidates?: ClipCandidate[];
   created_at: string;
   updated_at: string;
-  font_family?: string;
-  font_size?: number;
-  font_color?: string;
-  caption_template?: string;
-  include_broll?: boolean;
-  cut_long_pauses?: boolean;
-  pause_threshold_ms?: number;
-  remove_filler_words?: boolean;
-  filtered_words?: string[];
 }
-
-interface FontOption {
-  name: string;
-  display_name: string;
-}
-
-type StageKey = "queue" | "download" | "transcribe" | "analyze" | "render" | "complete";
-type StageState = "pending" | "active" | "done" | "failed";
-type StagePayload = Partial<Record<StageKey, { state?: StageState; progress?: number | null }>>;
 
 interface ProcessingStage {
   key: StageKey;
@@ -157,92 +123,39 @@ interface ProcessingStage {
   percent: number;
 }
 
-const PROCESSING_STAGES: Array<Omit<ProcessingStage, "state" | "percent">> = [
-  {
-    key: "queue",
-    label: "Queued",
-    detail: "Waiting for worker",
-    startProgress: 0,
-  },
-  {
-    key: "download",
-    label: "Download",
-    detail: "Fetch source video",
-    startProgress: 10,
-  },
-  {
-    key: "transcribe",
-    label: "Transcribe",
-    detail: "Generate transcript",
-    startProgress: 30,
-  },
-  {
-    key: "analyze",
-    label: "Analyze",
-    detail: "Find clip moments",
-    startProgress: 50,
-  },
-  {
-    key: "render",
-    label: "Render",
-    detail: "Create vertical clips",
-    startProgress: 70,
-  },
-  {
-    key: "complete",
-    label: "Complete",
-    detail: "Ready to edit",
-    startProgress: 100,
-  },
+const processingStageConfig: Array<Omit<ProcessingStage, "state" | "percent">> = [
+  { key: "queue", label: "Import", detail: "Queue source", startProgress: 0 },
+  { key: "download", label: "Fetch", detail: "Load video", startProgress: 10 },
+  { key: "transcribe", label: "Transcript", detail: "Time speech", startProgress: 30 },
+  { key: "analyze", label: "Moments", detail: "Find hooks", startProgress: 50 },
+  { key: "render", label: "Render", detail: "Create clips", startProgress: 70 },
+  { key: "complete", label: "Ready", detail: "Download", startProgress: 100 },
 ];
+
+const activeStatuses = ["queued", "processing", "retrying"];
 
 function inferStageKey(status: string | undefined, progress: number, message: string, errorCode?: string | null): StageKey {
   const normalizedMessage = message.toLowerCase();
   const normalizedErrorCode = (errorCode || "").toLowerCase();
 
   if (status === "completed") return "complete";
-
   if (normalizedErrorCode.includes("download") || normalizedMessage.includes("download")) return "download";
-  if (
-    normalizedErrorCode.includes("analysis") ||
-    normalizedMessage.includes("analyz") ||
-    normalizedMessage.includes("usable clip") ||
-    normalizedMessage.includes("no clip")
-  ) {
-    return "analyze";
-  }
-  if (
-    normalizedErrorCode.includes("transcript") ||
-    normalizedErrorCode.includes("transcription") ||
-    normalizedMessage.includes("transcript")
-  ) {
-    return "transcribe";
-  }
-  if (
-    normalizedErrorCode.includes("render") ||
-    normalizedMessage.includes("creating clip") ||
-    normalizedMessage.includes("video clips") ||
-    normalizedMessage.includes("ffmpeg") ||
-    progress >= 70
-  ) {
-    return "render";
-  }
+  if (normalizedErrorCode.includes("transcript") || normalizedMessage.includes("transcript")) return "transcribe";
+  if (normalizedErrorCode.includes("analysis") || normalizedMessage.includes("analyz")) return "analyze";
+  if (normalizedErrorCode.includes("render") || normalizedMessage.includes("clip") || progress >= 70) return "render";
   if (status === "queued" || progress < 10) return "queue";
   if (progress >= 50) return "analyze";
   if (progress >= 30) return "transcribe";
   return "download";
 }
 
-function buildProcessingStages(
-  task: TaskDetails | null,
-  progress: number,
-  progressMessage: string,
-): ProcessingStage[] {
+function buildProcessingStages(task: TaskDetails | null, progress: number, progressMessage: string): ProcessingStage[] {
   const status = task?.status;
   const activeProgress = Math.max(0, Math.min(100, progress || task?.progress || 0));
   const activeMessage = progressMessage || task?.progress_message || "";
+
   if (task?.stages) {
-    return PROCESSING_STAGES.map((stage) => {
+    return processingStageConfig.map((stage) => {
       const payload = task.stages?.[stage.key];
       const state = payload?.state && ["pending", "active", "done", "failed"].includes(payload.state)
         ? payload.state
@@ -254,30 +167,24 @@ function buildProcessingStages(
       };
     });
   }
+
   const persistedStage =
     typeof task?.failed_stage === "string" && task.failed_stage
       ? task.failed_stage
       : typeof task?.current_stage === "string" && task.current_stage
         ? task.current_stage
         : null;
-  const activeStage = PROCESSING_STAGES.some((stage) => stage.key === persistedStage)
+  const activeStage = processingStageConfig.some((stage) => stage.key === persistedStage)
     ? (persistedStage as StageKey)
     : inferStageKey(status, activeProgress, activeMessage, task?.error_code);
-  const activeStageIndex = PROCESSING_STAGES.findIndex((stage) => stage.key === activeStage);
+  const activeStageIndex = processingStageConfig.findIndex((stage) => stage.key === activeStage);
   const failedStageIndex = status === "error" || status === "cancelled" ? activeStageIndex : -1;
 
-  return PROCESSING_STAGES.map((stage, index) => {
+  return processingStageConfig.map((stage, index) => {
     let state: StageState = "pending";
-    if (status === "completed" || activeProgress >= stage.startProgress) {
-      state = "done";
-    }
-    if (index === activeStageIndex && status !== "completed") {
-      state = "active";
-    }
-    if (failedStageIndex === index) {
-      state = "failed";
-    }
-
+    if (status === "completed" || activeProgress >= stage.startProgress) state = "done";
+    if (index === activeStageIndex && status !== "completed") state = "active";
+    if (failedStageIndex === index) state = "failed";
     return {
       ...stage,
       state,
@@ -286,80 +193,91 @@ function buildProcessingStages(
   });
 }
 
-function StageDot({ state }: { state: StageState }) {
-  const className =
-    state === "done"
-      ? "border-stone-900 bg-stone-900"
-      : state === "active"
-        ? "border-blue-600 bg-blue-600"
-        : state === "failed"
-          ? "border-red-600 bg-red-600"
-          : "border-stone-300 bg-white";
-
-  return <span className={`mt-1 h-3 w-3 shrink-0 rounded-full border ${className}`} />;
+function formatDuration(seconds: number) {
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  return `${mins}:${secs.toString().padStart(2, "0")}`;
 }
 
-function ProcessingStageList({
-  stages,
-  currentMessage,
-  clipsReady,
-}: {
-  stages: ProcessingStage[];
-  currentMessage: string;
-  clipsReady: number;
-}) {
+function parseTimestampToSeconds(timestamp: string) {
+  const parts = timestamp.split(":").map((part) => Number(part));
+  if (parts.some((part) => !Number.isFinite(part))) return 0;
+  if (parts.length === 2) return parts[0] * 60 + parts[1];
+  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+  return Number(timestamp) || 0;
+}
+
+function scoreColor(score: number) {
+  if (score >= 0.8) return "border-emerald-200 bg-emerald-50 text-emerald-700";
+  if (score >= 0.6) return "border-amber-200 bg-amber-50 text-amber-700";
+  return "border-red-200 bg-red-50 text-red-700";
+}
+
+function viralityColor(score: number) {
+  if (score >= 80) return "text-emerald-600";
+  if (score >= 60) return "text-lime-600";
+  if (score >= 40) return "text-amber-600";
+  return "text-red-600";
+}
+
+function StatusBadge({ status }: { status: string }) {
+  const map: Record<string, string> = {
+    completed: "border-emerald-200 bg-emerald-50 text-emerald-700",
+    processing: "border-cyan-200 bg-cyan-50 text-cyan-700",
+    queued: "border-amber-200 bg-amber-50 text-amber-700",
+    retrying: "border-amber-200 bg-amber-50 text-amber-700",
+    analysis_ready: "border-lime-200 bg-lime-50 text-lime-700",
+    error: "border-red-200 bg-red-50 text-red-700",
+    cancelled: "border-slate-200 bg-slate-50 text-slate-600",
+  };
+
   return (
-    <div className="w-full max-w-3xl rounded-lg border border-stone-200 bg-white p-4 shadow-sm">
-      <div className="mb-4 flex items-center justify-between gap-3">
+    <span className={cn("inline-flex rounded-md border px-2.5 py-1 text-xs font-bold capitalize", map[status] || "border-slate-200 bg-white text-slate-600")}>
+      {status === "analysis_ready" ? "Review candidates" : status.replace("_", " ")}
+    </span>
+  );
+}
+
+function StageRail({ stages, message, clipsReady }: { stages: ProcessingStage[]; message: string; clipsReady: number }) {
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-sm font-semibold text-stone-950">Processing Stages</h2>
-          <p className="mt-1 text-xs text-stone-500">
-            {currentMessage || "Waiting for next update"}
-          </p>
+          <h2 className="font-[var(--font-syne)] text-xl font-bold text-slate-950">Generation</h2>
+          <p className="mt-1 text-sm text-slate-500">{message || "Waiting for worker update"}</p>
         </div>
         {clipsReady > 0 && (
-          <Badge variant="outline" className="shrink-0">
+          <Badge variant="outline" className="border-lime-200 bg-lime-50 text-lime-700">
             {clipsReady} ready
           </Badge>
         )}
       </div>
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid gap-3 md:grid-cols-6">
         {stages.map((stage) => (
           <div
             key={stage.key}
-            className={`rounded-md border p-3 ${
-              stage.state === "failed"
-                ? "border-red-200 bg-red-50"
-                : stage.state === "active"
-                  ? "border-blue-200 bg-blue-50"
-                  : stage.state === "done"
-                    ? "border-stone-200 bg-stone-50"
-                    : "border-stone-200 bg-white"
-            }`}
+            className={cn(
+              "rounded-lg border p-3",
+              stage.state === "done" && "border-emerald-200 bg-emerald-50",
+              stage.state === "active" && "border-cyan-200 bg-cyan-50",
+              stage.state === "failed" && "border-red-200 bg-red-50",
+              stage.state === "pending" && "border-slate-200 bg-slate-50",
+            )}
           >
-            <div className="flex items-start gap-3">
-              <StageDot state={stage.state} />
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center justify-between gap-2">
-                  <p className="truncate text-sm font-medium text-stone-950">{stage.label}</p>
-                  <span className="text-xs tabular-nums text-stone-500">
-                    {stage.state === "pending" ? "--" : `${stage.percent}%`}
-                  </span>
-                </div>
-                <p className="mt-1 text-xs text-stone-500">{stage.detail}</p>
-                <p
-                  className={`mt-2 text-xs font-medium capitalize ${
-                    stage.state === "failed"
-                      ? "text-red-700"
-                      : stage.state === "active"
-                        ? "text-blue-700"
-                        : "text-stone-500"
-                  }`}
-                >
-                  {stage.state}
-                </p>
-              </div>
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-sm font-bold text-slate-950">{stage.label}</span>
+              {stage.state === "done" ? (
+                <Check className="h-4 w-4 text-emerald-600" />
+              ) : stage.state === "active" ? (
+                <Loader2 className="h-4 w-4 animate-spin text-cyan-600" />
+              ) : stage.state === "failed" ? (
+                <X className="h-4 w-4 text-red-600" />
+              ) : (
+                <span className="h-2 w-2 rounded-full bg-slate-300" />
+              )}
             </div>
+            <p className="mt-1 text-xs text-slate-500">{stage.detail}</p>
+            <p className="mt-3 text-xs font-bold uppercase text-slate-400">{stage.state}</p>
           </div>
         ))}
       </div>
@@ -378,69 +296,24 @@ export default function TaskPage() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
   const [progressMessage, setProgressMessage] = useState("");
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [editedTitle, setEditedTitle] = useState("");
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [showDeleteTaskDialog, setShowDeleteTaskDialog] = useState(false);
+  const [deletingClipId, setDeletingClipId] = useState<string | null>(null);
   const [isResuming, setIsResuming] = useState(false);
   const [isRenderingCandidates, setIsRenderingCandidates] = useState(false);
   const [selectedCandidateOrders, setSelectedCandidateOrders] = useState<number[]>([]);
-  const [candidateDrafts, setCandidateDrafts] = useState<Record<number, EditableClipCandidate>>({});
   const [previewStartSeconds, setPreviewStartSeconds] = useState(0);
-  const [isEditing, setIsEditing] = useState(false);
-  const [editedTitle, setEditedTitle] = useState("");
-  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
-  const [deletingClipId, setDeletingClipId] = useState<string | null>(null);
-  const [isDeleting, setIsDeleting] = useState(false);
-  const [selectedClipIds, setSelectedClipIds] = useState<string[]>([]);
-  const [editingClipId, setEditingClipId] = useState<string | null>(null);
-  const [startOffset, setStartOffset] = useState("0");
-  const [endOffset, setEndOffset] = useState("0");
-  const [splitTime, setSplitTime] = useState("5");
-  const [captionText, setCaptionText] = useState("");
-  const [captionPosition, setCaptionPosition] = useState("bottom");
-  const [highlightWords, setHighlightWords] = useState("");
-  const [exportPreset, setExportPreset] = useState("original");
-
-  const [projectFontFamily, setProjectFontFamily] = useState("TikTokSans-Regular");
-  const [projectFontSize, setProjectFontSize] = useState("24");
-  const [projectFontColor, setProjectFontColor] = useState("#FFFFFF");
-  const [projectCaptionTemplate, setProjectCaptionTemplate] = useState("default");
-  const [projectIncludeBroll, setProjectIncludeBroll] = useState(false);
-  const [projectCutLongPauses, setProjectCutLongPauses] = useState(false);
-  const [projectPauseThresholdMs, setProjectPauseThresholdMs] = useState("900");
-  const [projectRemoveFillerWords, setProjectRemoveFillerWords] = useState(false);
-  const [projectFilteredWords, setProjectFilteredWords] = useState("");
-  const [isApplyingSettings, setIsApplyingSettings] = useState(false);
-  const [settingsSheetOpen, setSettingsSheetOpen] = useState(false);
-  const [availableFonts, setAvailableFonts] = useState<FontOption[]>([]);
-  const [availableTemplates, setAvailableTemplates] = useState<
-    Array<{ id: string; name: string; description: string; animation: string }>
-  >([]);
   const hasTriggeredAutoRefresh = useRef(false);
-  const processingStages = useMemo(
-    () => buildProcessingStages(task, progress, progressMessage),
-    [
-      task?.status,
-      task?.progress,
-      task?.progress_message,
-      task?.error_code,
-      task?.current_stage,
-      task?.failed_stage,
-      task?.stages,
-      progress,
-      progressMessage,
-    ],
-  );
 
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
   const taskApiUrl = "/api/tasks";
-  const getClipUrl = (videoUrl: string) =>
-    videoUrl.startsWith("/api/") ? videoUrl : `/api${videoUrl}`;
-  const getSourcePreviewUrl = () => `${taskApiUrl}/${params.id}/source-file#t=${Math.max(0, previewStartSeconds)}`;
-  const parseTimestampToSeconds = (timestamp: string) => {
-    const parts = timestamp.split(":").map((part) => Number(part));
-    if (parts.some((part) => !Number.isFinite(part))) return 0;
-    if (parts.length === 2) return parts[0] * 60 + parts[1];
-    if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
-    return Number(timestamp) || 0;
-  };
+  const taskId = Array.isArray(params.id) ? params.id[0] : params.id;
+  const stages = useMemo(() => buildProcessingStages(task, progress, progressMessage), [task, progress, progressMessage]);
+  const activeClip = clips[0];
+
+  const getClipUrl = (videoUrl: string) => (videoUrl.startsWith("/api/") ? videoUrl : `/api${videoUrl}`);
+  const getSourcePreviewUrl = () => `${taskApiUrl}/${taskId}/source-file#t=${Math.max(0, previewStartSeconds)}`;
 
   const buildSupportError = useCallback(async (response: Response, fallbackMessage: string) => {
     const parsed = await parseApiError(response, fallbackMessage);
@@ -455,32 +328,16 @@ export default function TaskPage() {
     }, 700);
   }, []);
 
-  const getTaskFailureMessage = useCallback((taskData: TaskDetails | null) => {
-    const message = taskData?.error_message || taskData?.progress_message || progressMessage;
-    if (typeof message === "string" && message.trim()) {
-      return message.trim();
-    }
-    return "Processing failed before a detailed error was saved.";
-  }, [progressMessage]);
-
   const fetchTaskStatus = useCallback(
     async (retryCount = 0, maxRetries = 5) => {
-      if (!params.id) return false;
+      if (!taskId) return false;
 
       try {
-        const taskResponse = await fetch(`${taskApiUrl}/${params.id}`, {
-          cache: "no-store",
-        });
-
-        // Handle 404 with retry logic (task might not be persisted yet)
+        const taskResponse = await fetch(`${taskApiUrl}/${taskId}`, { cache: "no-store" });
         if (taskResponse.status === 404 && retryCount < maxRetries) {
-          console.log(
-            `Task not found yet, retrying in ${(retryCount + 1) * 500}ms... (${retryCount + 1}/${maxRetries})`,
-          );
           await new Promise((resolve) => setTimeout(resolve, (retryCount + 1) * 500));
           return fetchTaskStatus(retryCount + 1, maxRetries);
         }
-
         if (!taskResponse.ok) {
           throw new Error(await buildSupportError(taskResponse, `Failed to fetch task: ${taskResponse.status}`));
         }
@@ -489,79 +346,42 @@ export default function TaskPage() {
         setTask(taskData);
         setProgress(taskData.progress || 0);
         setProgressMessage(taskData.progress_message || "");
-        setProjectFontFamily(taskData.font_family || "TikTokSans-Regular");
-        setProjectFontSize(String(taskData.font_size || 24));
-        setProjectFontColor(taskData.font_color || "#FFFFFF");
-        setProjectCaptionTemplate(taskData.caption_template || "default");
-        setProjectIncludeBroll(Boolean(taskData.include_broll));
-        setProjectCutLongPauses(Boolean(taskData.cut_long_pauses));
-        setProjectPauseThresholdMs(String(taskData.pause_threshold_ms || 900));
-        setProjectRemoveFillerWords(Boolean(taskData.remove_filler_words));
-        setProjectFilteredWords((taskData.filtered_words || []).join(", "));
+
         if (taskData.status === "analysis_ready") {
-          const candidateOrders = (taskData.clip_candidates || [])
+          const orders = (taskData.clip_candidates || [])
             .map((candidate: ClipCandidate) => candidate.candidate_order)
             .filter((order: number) => Number.isFinite(order));
-          setSelectedCandidateOrders((current) => (current.length > 0 ? current : candidateOrders));
-          setCandidateDrafts((current) => {
-            if (Object.keys(current).length > 0) return current;
-            return (taskData.clip_candidates || []).reduce(
-              (drafts: Record<number, EditableClipCandidate>, candidate: ClipCandidate) => {
-                drafts[candidate.candidate_order] = {
-                  ...candidate,
-                  text: candidate.text || "",
-                  reasoning: candidate.reasoning || "",
-                };
-                return drafts;
-              },
-              {},
-            );
-          });
+          setSelectedCandidateOrders((current) => (current.length > 0 ? current : orders));
         }
 
-        // Fetch clips for active/completed/error states so partial clips stay visible.
         if (["completed", "processing", "retrying", "analysis_ready", "error", "cancelled"].includes(taskData.status)) {
-          const clipsResponse = await fetch(`${taskApiUrl}/${params.id}/clips`, {
-            cache: "no-store",
-          });
-
+          const clipsResponse = await fetch(`${taskApiUrl}/${taskId}/clips`, { cache: "no-store" });
           if (!clipsResponse.ok) {
             throw new Error(await buildSupportError(clipsResponse, `Failed to fetch clips: ${clipsResponse.status}`));
           }
-
           const clipsData = await clipsResponse.json();
-          const nextClips = clipsData.clips || [];
-          setClips((prev) => {
-            if (["completed", "error", "cancelled"].includes(taskData.status)) {
-              return nextClips;
-            }
-
+          const nextClips = (clipsData.clips || []) as Clip[];
+          setClips((current) => {
+            if (["completed", "error", "cancelled"].includes(taskData.status)) return nextClips;
             const merged = new Map<string, Clip>();
-            for (const clip of prev) {
-              merged.set(clip.id, clip);
-            }
-            for (const clip of nextClips) {
-              merged.set(clip.id, clip);
-            }
-            return Array.from(merged.values()).sort(
-              (a, b) => (a.clip_order ?? 0) - (b.clip_order ?? 0),
-            );
+            current.forEach((clip) => merged.set(clip.id, clip));
+            nextClips.forEach((clip) => merged.set(clip.id, clip));
+            return Array.from(merged.values()).sort((a, b) => (a.clip_order ?? 0) - (b.clip_order ?? 0));
           });
         }
 
         return true;
-      } catch (err) {
-        console.error("Error fetching task data:", err);
-        setError(err instanceof Error ? err.message : "Failed to load task");
+      } catch (fetchError) {
+        console.error("Error fetching task data:", fetchError);
+        setError(fetchError instanceof Error ? fetchError.message : "Failed to load task");
         return false;
       }
     },
-    [buildSupportError, params.id, taskApiUrl],
+    [buildSupportError, taskId],
   );
 
-  // Initial fetch - runs immediately, doesn't wait for session
   useEffect(() => {
-    if (!params.id) return;
+    if (!taskId) return;
 
     const fetchTaskData = async () => {
       try {
@@ -572,1680 +392,567 @@ export default function TaskPage() {
       }
     };
 
-    fetchTaskData();
-  }, [params.id, fetchTaskStatus]);
+    void fetchTaskData();
+  }, [taskId, fetchTaskStatus]);
 
-  useEffect(() => {
-    const loadFonts = async () => {
-      try {
-        const response = await fetch("/api/fonts", { cache: "no-store" });
-        if (!response.ok) {
-          return;
-        }
-        const data = await response.json();
-        setAvailableFonts(data.fonts || []);
-      } catch (loadError) {
-        console.error("Failed to load fonts:", loadError);
-      }
-    };
-
-    void loadFonts();
-
-    const loadTemplates = async () => {
-      try {
-        const response = await fetch(`${apiUrl}/caption-templates`);
-        if (response.ok) {
-          const data = await response.json();
-          setAvailableTemplates(data.templates || []);
-        }
-      } catch (error) {
-        console.error("Failed to load caption templates:", error);
-      }
-    };
-    void loadTemplates();
-  }, [apiUrl]);
-
-  // SSE effect - real-time progress updates
   useEffect(() => {
     const taskStatus = task?.status;
-    if (!params.id || !taskStatus) return;
+    if (!taskId || !taskStatus || !activeStatuses.includes(taskStatus)) return;
 
-    // Only connect to SSE if task is active
-    if (!["queued", "processing", "retrying"].includes(taskStatus)) return;
+    const eventSource = new EventSource(`${taskApiUrl}/${taskId}/progress`);
 
-    const eventSource = new EventSource(`${taskApiUrl}/${params.id}/progress`);
-
-    console.log("📡 Connected to SSE for real-time progress");
-
-    eventSource.addEventListener("status", (e) => {
-      const data = JSON.parse(e.data);
-      console.log("📊 Status:", data);
+    const updateFromEvent = (event: MessageEvent<string>) => {
+      const data = JSON.parse(event.data);
       setProgress(data.progress || 0);
       setProgressMessage(data.message || "");
       if (data.status) {
-        setTask((currentTask) =>
-          currentTask
+        setTask((current) =>
+          current
             ? {
-                ...currentTask,
+                ...current,
                 status: data.status,
-                progress: data.progress ?? currentTask.progress,
-                progress_message: data.message ?? currentTask.progress_message,
-                current_stage: data.current_stage ?? currentTask.current_stage,
-                failed_stage: data.failed_stage ?? currentTask.failed_stage,
-                resume_from_stage: data.resume_from_stage ?? currentTask.resume_from_stage,
-                resume_action_label: data.resume_action_label ?? currentTask.resume_action_label,
-                error_code: data.error_code ?? currentTask.error_code,
-                error_message: data.error_message ?? currentTask.error_message,
-                retry_count: data.retry_count ?? currentTask.retry_count,
-                max_retries: data.max_retries ?? currentTask.max_retries,
-                stages: data.stages ?? currentTask.stages,
+                progress: data.progress ?? current.progress,
+                progress_message: data.message ?? current.progress_message,
+                current_stage: data.current_stage ?? current.current_stage,
+                failed_stage: data.failed_stage ?? current.failed_stage,
+                resume_from_stage: data.resume_from_stage ?? current.resume_from_stage,
+                resume_action_label: data.resume_action_label ?? current.resume_action_label,
+                error_code: data.error_code ?? current.error_code,
+                error_message: data.error_message ?? current.error_message,
+                retry_count: data.retry_count ?? current.retry_count,
+                max_retries: data.max_retries ?? current.max_retries,
+                stages: data.stages ?? current.stages,
               }
-            : currentTask,
+            : current,
         );
-      }
-
-      if (data.status === "completed") {
-        void fetchTaskStatus().then(() => triggerAutoRefresh());
-      } else if (data.status === "analysis_ready" || data.status === "error" || data.status === "cancelled") {
-        void fetchTaskStatus();
-      }
-    });
-
-    eventSource.addEventListener("progress", (e) => {
-      const data = JSON.parse(e.data);
-      console.log("📈 Progress:", data);
-      setProgress(data.progress || 0);
-      setProgressMessage(data.message || "");
-
-      // Update task status if provided
-      if (data.status) {
-        setTask((currentTask) =>
-          currentTask
-            ? {
-                ...currentTask,
-                status: data.status,
-                progress: data.progress ?? currentTask.progress,
-                progress_message: data.message ?? currentTask.progress_message,
-                current_stage: data.current_stage ?? currentTask.current_stage,
-                failed_stage: data.failed_stage ?? currentTask.failed_stage,
-                resume_from_stage: data.resume_from_stage ?? currentTask.resume_from_stage,
-                resume_action_label: data.resume_action_label ?? currentTask.resume_action_label,
-                error_code: data.error_code ?? currentTask.error_code,
-                error_message: data.error_message ?? currentTask.error_message,
-                retry_count: data.retry_count ?? currentTask.retry_count,
-                max_retries: data.max_retries ?? currentTask.max_retries,
-                stages: data.stages ?? currentTask.stages,
-              }
-            : currentTask,
-        );
-
         if (data.status === "completed") {
           void fetchTaskStatus().then(() => triggerAutoRefresh());
-        } else if (data.status === "analysis_ready" || data.status === "error" || data.status === "cancelled") {
+        } else if (["analysis_ready", "error", "cancelled"].includes(data.status)) {
           void fetchTaskStatus();
         }
       }
-    });
+    };
 
-    eventSource.addEventListener("clip_ready", (e) => {
-      const data = JSON.parse(e.data);
-      console.log("🎬 Clip ready:", data.clip_index + 1, "/", data.total_clips);
+    eventSource.addEventListener("status", updateFromEvent);
+    eventSource.addEventListener("progress", updateFromEvent);
+    eventSource.addEventListener("clip_ready", (event) => {
+      const data = JSON.parse((event as MessageEvent<string>).data);
       if (data.clip) {
-        setClips((prev) => {
-          const exists = prev.some((c: Clip) => c.id === data.clip.id);
-          if (exists) return prev;
-          return [...prev, data.clip].sort(
-            (a: Clip, b: Clip) => (a.clip_order ?? 0) - (b.clip_order ?? 0),
-          );
+        setClips((current) => {
+          if (current.some((clip) => clip.id === data.clip.id)) return current;
+          return [...current, data.clip].sort((a, b) => (a.clip_order ?? 0) - (b.clip_order ?? 0));
         });
       }
     });
-
-    eventSource.addEventListener("close", async (e) => {
-      const data = JSON.parse(e.data);
-      console.log("Task stream closed:", data.status);
+    eventSource.addEventListener("close", (event) => {
+      const data = JSON.parse((event as MessageEvent<string>).data);
       eventSource.close();
-
-      await fetchTaskStatus();
-      if (data.status === "completed") {
-        triggerAutoRefresh();
-      }
+      void fetchTaskStatus();
+      if (data.status === "completed") triggerAutoRefresh();
     });
-
-    eventSource.addEventListener("error", (e) => {
-      console.error("❌ SSE error:", e);
-      const maybeMessageEvent = e as MessageEvent<string>;
-      if (typeof maybeMessageEvent.data === "string" && maybeMessageEvent.data.length > 0) {
-        try {
-          const data = JSON.parse(maybeMessageEvent.data);
-          setActionError(data.error || "Connection error");
-        } catch {
-          setActionError("Connection error");
-        }
-      }
+    eventSource.addEventListener("error", () => {
+      setActionError("Connection interrupted. Refreshed latest task state.");
       void fetchTaskStatus();
       eventSource.close();
     });
 
-    return () => {
-      console.log("🔌 Disconnecting SSE");
-      eventSource.close();
-    };
-  }, [params.id, task?.status, fetchTaskStatus, taskApiUrl, triggerAutoRefresh]); // Re-run when task status changes
-
-  const formatDuration = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = Math.floor(seconds % 60);
-    return `${mins}:${secs.toString().padStart(2, "0")}`;
-  };
-
-  const getScoreColor = (score: number) => {
-    if (score >= 0.8) return "bg-green-100 text-green-800";
-    if (score >= 0.6) return "bg-yellow-100 text-yellow-800";
-    return "bg-red-100 text-red-800";
-  };
-
-  const getViralityColor = (score: number) => {
-    if (score >= 80) return "text-green-600";
-    if (score >= 60) return "text-yellow-600";
-    if (score >= 40) return "text-orange-600";
-    return "text-red-600";
-  };
-
-  const getViralityBgColor = (score: number) => {
-    if (score >= 80) return "bg-green-500";
-    if (score >= 60) return "bg-yellow-500";
-    if (score >= 40) return "bg-orange-500";
-    return "bg-red-500";
-  };
-
-  const getHookTypeLabel = (hookType: string | null) => {
-    const labels: Record<string, string> = {
-      question: "Question Hook",
-      statement: "Bold Statement",
-      statistic: "Data/Stats",
-      story: "Story Hook",
-      contrast: "Contrast Hook",
-      none: "No Hook",
-    };
-    return labels[hookType || "none"] || hookType || "None";
-  };
+    return () => eventSource.close();
+  }, [fetchTaskStatus, task?.status, taskId, triggerAutoRefresh]);
 
   const handleEditTitle = async () => {
-    if (!editedTitle.trim() || !session?.user?.id || !params.id) return;
+    if (!editedTitle.trim() || !session?.user?.id || !taskId) return;
 
-    try {
-      const response = await fetch(`${taskApiUrl}/${params.id}`, {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ title: editedTitle }),
-      });
+    const response = await fetch(`${taskApiUrl}/${taskId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: editedTitle }),
+    });
 
-      if (response.ok) {
-        setTask(task ? { ...task, source_title: editedTitle } : null);
-        setIsEditing(false);
-      } else {
-        alert(await buildSupportError(response, "Failed to update title"));
-      }
-    } catch (err) {
-      console.error("Error updating title:", err);
-      alert(err instanceof Error ? err.message : "Failed to update title");
+    if (!response.ok) {
+      setActionError(await buildSupportError(response, "Failed to update title"));
+      return;
     }
+
+    setTask((current) => (current ? { ...current, source_title: editedTitle } : current));
+    setIsEditingTitle(false);
   };
 
   const handleDeleteTask = async () => {
-    if (!session?.user?.id || !params.id) return;
-
+    if (!session?.user?.id || !taskId) return;
     setIsDeleting(true);
-    try {
-      const response = await fetch(`${taskApiUrl}/${params.id}`, {
-        method: "DELETE",
-      });
-
-      if (response.ok) {
-        router.push("/list");
-      } else {
-        alert(await buildSupportError(response, "Failed to delete task"));
-      }
-    } catch (err) {
-      console.error("Error deleting task:", err);
-      alert(err instanceof Error ? err.message : "Failed to delete task");
-    } finally {
-      setIsDeleting(false);
-      setShowDeleteDialog(false);
-    }
-  };
-
-  const handleDeleteClip = async (clipId: string) => {
-    if (!session?.user?.id || !params.id) return;
-
-    try {
-      const response = await fetch(`${taskApiUrl}/${params.id}/clips/${clipId}`, {
-        method: "DELETE",
-      });
-
-      if (response.ok) {
-        setClips(clips.filter((clip) => clip.id !== clipId));
-        setDeletingClipId(null);
-      } else {
-        alert(await buildSupportError(response, "Failed to delete clip"));
-      }
-    } catch (err) {
-      console.error("Error deleting clip:", err);
-      alert(err instanceof Error ? err.message : "Failed to delete clip");
-    }
-  };
-
-  const handleToggleClipSelection = (clipId: string) => {
-    setSelectedClipIds((prev) => {
-      if (prev.includes(clipId)) {
-        return prev.filter((id) => id !== clipId);
-      }
-      return [...prev, clipId];
-    });
-  };
-
-  const handleTrimClip = async (clipId: string) => {
-    if (!session?.user?.id || !params.id) return;
-    const response = await fetch(`${taskApiUrl}/${params.id}/clips/${clipId}`, {
-      method: "PATCH",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        start_offset: Number(startOffset || "0"),
-        end_offset: Number(endOffset || "0"),
-      }),
-    });
+    const response = await fetch(`${taskApiUrl}/${taskId}`, { method: "DELETE" });
+    setIsDeleting(false);
+    setShowDeleteTaskDialog(false);
     if (!response.ok) {
-      alert(await buildSupportError(response, "Failed to trim clip"));
+      setActionError(await buildSupportError(response, "Failed to delete task"));
+      return;
+    }
+    router.push("/list");
+  };
+
+  const handleCancelTask = async () => {
+    if (!task?.id) return;
+    const response = await fetch(`${taskApiUrl}/${task.id}/cancel`, { method: "POST" });
+    if (!response.ok) {
+      setActionError(await buildSupportError(response, "Failed to cancel task"));
       return;
     }
     await fetchTaskStatus();
-  };
-
-  const handleSplitClip = async (clipId: string) => {
-    if (!session?.user?.id || !params.id) return;
-    const response = await fetch(`${taskApiUrl}/${params.id}/clips/${clipId}/split`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ split_time: Number(splitTime || "5") }),
-    });
-    if (!response.ok) {
-      alert(await buildSupportError(response, "Failed to split clip"));
-      return;
-    }
-    await fetchTaskStatus();
-  };
-
-  const handleMergeClips = async () => {
-    if (!session?.user?.id || !params.id || selectedClipIds.length < 2) return;
-    const response = await fetch(`${taskApiUrl}/${params.id}/clips/merge`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ clip_ids: selectedClipIds }),
-    });
-    if (!response.ok) {
-      alert(await buildSupportError(response, "Failed to merge clips"));
-      return;
-    }
-    setSelectedClipIds([]);
-    await fetchTaskStatus();
-  };
-
-  const handleUpdateCaptions = async (clipId: string) => {
-    if (!session?.user?.id || !params.id) return;
-    const response = await fetch(`${taskApiUrl}/${params.id}/clips/${clipId}/captions`, {
-      method: "PATCH",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        caption_text: captionText,
-        position: captionPosition,
-        highlight_words: highlightWords
-          .split(",")
-          .map((w) => w.trim())
-          .filter(Boolean),
-      }),
-    });
-    if (!response.ok) {
-      alert(await buildSupportError(response, "Failed to update captions"));
-      return;
-    }
-    await fetchTaskStatus();
-  };
-
-  const handleApplyProjectSettings = async () => {
-    if (!session?.user?.id || !params.id) return;
-    const parsedSize = Number(projectFontSize || "24");
-    const safeFontSize = Number.isFinite(parsedSize) ? Math.max(12, Math.min(72, Math.round(parsedSize))) : 24;
-    const normalizedColor = /^#[0-9A-Fa-f]{6}$/.test(projectFontColor) ? projectFontColor : "#FFFFFF";
-    const parsedPauseThreshold = Number(projectPauseThresholdMs || "900");
-    const safePauseThreshold = Number.isFinite(parsedPauseThreshold)
-      ? Math.max(250, Math.min(3000, Math.round(parsedPauseThreshold)))
-      : 900;
-    const normalizedFilteredWords = projectFilteredWords
-      .split(",")
-      .map((word) => word.trim().toLowerCase())
-      .filter(Boolean);
-
-    setIsApplyingSettings(true);
-    try {
-      const response = await fetch(`${taskApiUrl}/${params.id}/settings`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          font_family: projectFontFamily,
-          font_size: safeFontSize,
-          font_color: normalizedColor,
-          caption_template: projectCaptionTemplate,
-          include_broll: projectIncludeBroll,
-          cut_long_pauses: projectCutLongPauses,
-          pause_threshold_ms: safePauseThreshold,
-          remove_filler_words: projectRemoveFillerWords,
-          filtered_words: normalizedFilteredWords,
-          apply_to_existing: true,
-        }),
-      });
-      if (!response.ok) {
-        alert(await buildSupportError(response, "Failed to apply settings"));
-        return;
-      }
-      await fetchTaskStatus();
-    } finally {
-      setIsApplyingSettings(false);
-    }
-  };
-
-  const handleExportClip = async (clipId: string, fallbackFilename: string) => {
-    if (!session?.user?.id || !task?.id) return;
-
-    const response = await fetch(`${taskApiUrl}/${task.id}/clips/${clipId}/export?preset=${exportPreset}`, {
-      cache: "no-store",
-    });
-
-    if (!response.ok) {
-      alert(await buildSupportError(response, "Failed to export clip"));
-      return;
-    }
-
-    const blob = await response.blob();
-    const blobUrl = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = blobUrl;
-    link.download = `${fallbackFilename.replace(/\.mp4$/i, "")}_${exportPreset}.mp4`;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(blobUrl);
-  };
-
-  const handleDownloadClip = (clip: Clip) => {
-    if (exportPreset === "original") {
-      const link = document.createElement("a");
-      link.href = getClipUrl(clip.video_url);
-      link.download = clip.filename;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      return;
-    }
-    void handleExportClip(clip.id, clip.filename);
   };
 
   const handleResumeTask = async () => {
     if (!task?.id) return;
-
     setIsResuming(true);
     setActionError(null);
-    setError(null);
-    try {
-      const response = await fetch(`${taskApiUrl}/${task.id}/resume`, {
-        method: "POST",
-      });
-      if (!response.ok) {
-        throw new Error(await buildSupportError(response, "Failed to resume task"));
-      }
-      setProgress(0);
-      setProgressMessage("Re-queued by user");
-      setTask((currentTask) =>
-        currentTask
-          ? {
-              ...currentTask,
-              status: "queued",
-              progress: 0,
-              progress_message: "Re-queued by user",
-            }
-          : currentTask,
-      );
-      await fetchTaskStatus();
-    } catch (resumeError) {
-      setActionError(resumeError instanceof Error ? resumeError.message : "Failed to resume task");
-    } finally {
-      setIsResuming(false);
+    const response = await fetch(`${taskApiUrl}/${task.id}/resume`, { method: "POST" });
+    setIsResuming(false);
+    if (!response.ok) {
+      setActionError(await buildSupportError(response, "Failed to resume task"));
+      return;
     }
+    setProgress(0);
+    setProgressMessage("Re-queued by user");
+    await fetchTaskStatus();
   };
 
   const handleToggleCandidate = (candidateOrder: number) => {
-    setSelectedCandidateOrders((current) => {
-      if (current.includes(candidateOrder)) {
-        return current.filter((order) => order !== candidateOrder);
-      }
-      return [...current, candidateOrder].sort((a, b) => a - b);
-    });
-  };
-
-  const handleToggleAllCandidates = () => {
-    const candidateOrders = (task?.clip_candidates || []).map((candidate) => candidate.candidate_order);
     setSelectedCandidateOrders((current) =>
-      current.length === candidateOrders.length ? [] : candidateOrders,
+      current.includes(candidateOrder)
+        ? current.filter((order) => order !== candidateOrder)
+        : [...current, candidateOrder].sort((a, b) => a - b),
     );
   };
-
-  const handleUpdateCandidateDraft = (
-    candidateOrder: number,
-    field: keyof Pick<EditableClipCandidate, "start_time" | "end_time" | "text" | "reasoning">,
-    value: string,
-  ) => {
-    setCandidateDrafts((current) => {
-      const existing = current[candidateOrder];
-      if (!existing) return current;
-      return {
-        ...current,
-        [candidateOrder]: {
-          ...existing,
-          [field]: value,
-        },
-      };
-    });
-  };
-
-  const buildEditedCandidatesPayload = () =>
-    selectedCandidateOrders
-      .map((order) => candidateDrafts[order])
-      .filter(Boolean)
-      .map((candidate) => ({
-        candidate_order: candidate.candidate_order,
-        start_time: candidate.start_time,
-        end_time: candidate.end_time,
-        text: candidate.text,
-        reasoning: candidate.reasoning,
-        relevance_score: candidate.relevance_score,
-        virality_score: candidate.virality_score,
-        hook_score: candidate.hook_score,
-        engagement_score: candidate.engagement_score,
-        value_score: candidate.value_score,
-        shareability_score: candidate.shareability_score,
-        hook_type: candidate.hook_type,
-      }));
 
   const handleRenderCandidates = async () => {
     if (!task?.id || selectedCandidateOrders.length === 0) return;
-    const editedCandidates = buildEditedCandidatesPayload();
-    if (editedCandidates.length === 0) return;
-
     setIsRenderingCandidates(true);
     setActionError(null);
-    try {
-      const response = await fetch(`${taskApiUrl}/${task.id}/render`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          candidate_orders: selectedCandidateOrders,
-          edited_candidates: editedCandidates,
-        }),
-      });
-      if (!response.ok) {
-        throw new Error(await buildSupportError(response, "Failed to render candidates"));
-      }
-      setProgress(70);
-      setProgressMessage("Queued for rendering");
-      setTask((currentTask) =>
-        currentTask
-          ? {
-              ...currentTask,
-              status: "queued",
-              progress: 70,
-              progress_message: "Queued for rendering",
-              current_stage: "render",
-              failed_stage: "",
-            }
-          : currentTask,
-      );
-      await fetchTaskStatus();
-    } catch (renderError) {
-      setActionError(renderError instanceof Error ? renderError.message : "Failed to render candidates");
-    } finally {
-      setIsRenderingCandidates(false);
+    const response = await fetch(`${taskApiUrl}/${task.id}/render`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ candidate_orders: selectedCandidateOrders }),
+    });
+    setIsRenderingCandidates(false);
+    if (!response.ok) {
+      setActionError(await buildSupportError(response, "Failed to render candidates"));
+      return;
     }
+    setProgress(70);
+    setProgressMessage("Queued for rendering");
+    await fetchTaskStatus();
   };
+
+  const handleDownloadClip = (clip: Clip) => {
+    const link = document.createElement("a");
+    link.href = getClipUrl(clip.video_url);
+    link.download = clip.filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  };
+
+  const handleDeleteClip = async (clipId: string) => {
+    if (!session?.user?.id || !task?.id) return;
+    const response = await fetch(`${taskApiUrl}/${task.id}/clips/${clipId}`, { method: "DELETE" });
+    if (!response.ok) {
+      setActionError(await buildSupportError(response, "Failed to delete clip"));
+      return;
+    }
+    setClips((current) => current.filter((clip) => clip.id !== clipId));
+    setDeletingClipId(null);
+  };
+
+  const failureMessage = task?.error_message || task?.progress_message || progressMessage || "Processing stopped.";
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-white p-4">
-        <div className="max-w-6xl mx-auto">
-          <div className="mb-6">
-            <Skeleton className="h-8 w-48 mb-2" />
-            <Skeleton className="h-4 w-96" />
-          </div>
-          <div className="grid gap-6">
-            {[1, 2, 3].map((i) => (
-              <Card key={i}>
-                <CardContent className="p-6">
-                  <Skeleton className="h-48 w-full mb-4" />
-                  <Skeleton className="h-4 w-full mb-2" />
-                  <Skeleton className="h-4 w-3/4" />
-                </CardContent>
-              </Card>
-            ))}
-          </div>
+      <StudioShell title="Clip review" subtitle="Load task">
+        <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
+          <Skeleton className="h-[560px] rounded-lg" />
+          <Skeleton className="h-[560px] rounded-lg" />
         </div>
-      </div>
+      </StudioShell>
     );
   }
 
-  if (error) {
+  if (error || !task) {
     return (
-      <div className="min-h-screen bg-white p-4">
-        <div className="max-w-6xl mx-auto">
-          <Alert>
-            <AlertDescription>{error}</AlertDescription>
-          </Alert>
-          <Link href="/" className="mt-4 inline-block">
-            <Button variant="outline">
-              <ArrowLeft className="w-4 h-4" />
-              Back to Home
-            </Button>
-          </Link>
-        </div>
-      </div>
+      <StudioShell title="Clip review" subtitle="Task unavailable">
+        <Alert className="border-red-200 bg-red-50">
+          <AlertCircle className="h-4 w-4 text-red-600" />
+          <AlertDescription>{error || "Task not found"}</AlertDescription>
+        </Alert>
+      </StudioShell>
     );
   }
 
   return (
-    <div className="min-h-screen bg-white">
-      {/* Header */}
-      <div className="border-b bg-white">
-        <div className="max-w-6xl mx-auto px-4 py-6">
-          <div className="flex items-center gap-4 mb-4">
-            <Link href="/">
-              <Button variant="ghost" size="sm">
-                <ArrowLeft className="w-4 h-4" />
-                Back
-              </Button>
-            </Link>
-          </div>
-
-          {task && (
-            <div>
-              <div className="flex items-center gap-3 mb-2">
-                {isEditing ? (
-                  <div className="flex items-center gap-2 flex-1">
-                    <Input
-                      value={editedTitle}
-                      onChange={(e) => setEditedTitle(e.target.value)}
-                      className="text-2xl font-bold h-auto py-1"
-                      autoFocus
-                    />
-                    <Button size="sm" onClick={handleEditTitle} disabled={!editedTitle.trim()}>
-                      <Check className="w-4 h-4" />
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => {
-                        setIsEditing(false);
-                        setEditedTitle(task.source_title);
-                      }}
-                    >
-                      <X className="w-4 h-4" />
-                    </Button>
-                  </div>
-                ) : (
-                  <>
-                    <h1 className={`text-2xl font-bold text-black ${["processing", "queued", "retrying"].includes(task.status) ? "shimmer" : ""}`}>{task.source_title}</h1>
-                    <div className="flex items-center gap-1">
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => {
-                          setIsEditing(true);
-                          setEditedTitle(task.source_title);
-                        }}
-                      >
-                        <Edit2 className="w-4 h-4" />
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="text-red-600 hover:text-red-700 hover:bg-red-50"
-                        onClick={() => setShowDeleteDialog(true)}
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </Button>
-                    </div>
-                  </>
-                )}
-              </div>
-              <div className="flex items-center gap-4 text-sm text-gray-600">
-                <Badge variant="outline" className="capitalize">
-                  {task.source_type}
-                </Badge>
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <span className="flex items-center gap-1 cursor-default">
-                        <Clock className="w-4 h-4" />
-                        {new Date(task.created_at).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })}
-                      </span>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      {new Date(task.created_at).toLocaleString(undefined, {
-                        year: "numeric",
-                        month: "long",
-                        day: "numeric",
-                        hour: "2-digit",
-                        minute: "2-digit",
-                        second: "2-digit",
-                        timeZoneName: "short",
-                      })}
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-                {task.status === "completed" ? (
-                  <span>
-                    {clips.length} {clips.length === 1 ? "clip" : "clips"} generated
-                  </span>
-                ) : task.status === "processing" ? (
-                  <div className="relative group">
-                    <Badge className="bg-blue-100 text-blue-800 cursor-default shimmer">Processing</Badge>
-                    <div className="absolute top-full mt-2 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-md border bg-popover px-3 py-1.5 text-sm text-popover-foreground shadow-md opacity-0 scale-95 transition-all group-hover:opacity-100 group-hover:scale-100 pointer-events-none">
-                      🔍&nbsp;&nbsp;We&apos;re currently processing your video. Check back in a couple minutes.
-                    </div>
-                  </div>
-                ) : task.status === "queued" ? (
-                  <Badge className="bg-yellow-100 text-yellow-800">Queued</Badge>
-                ) : task.status === "retrying" ? (
-                  <Badge className="bg-amber-100 text-amber-800">
-                    Retrying {task.retry_count || 0}/{task.max_retries || 3}
-                  </Badge>
-                ) : task.status === "analysis_ready" ? (
-                  <Badge className="bg-emerald-100 text-emerald-800">Review Candidates</Badge>
-                ) : task.status === "error" ? (
-                  <Badge className="bg-red-100 text-red-800">Error</Badge>
-                ) : task.status === "cancelled" ? (
-                  <Badge className="bg-gray-100 text-gray-700">Cancelled</Badge>
-                ) : (
-                  <Badge variant="outline" className="capitalize">
-                    {task.status}
-                  </Badge>
-                )}
-                {task.status === "completed" && clips.length > 0 && (
-                  <Link href={`/tasks/${task.id}/edit`}>
-                    <Button size="sm" variant="outline">
-                      <Clapperboard className="w-4 h-4" />
-                      Open Editor
-                    </Button>
-                  </Link>
-                )}
-                {task.dead_letter && (
-                  <Badge className="bg-red-100 text-red-800">Dead Letter</Badge>
-                )}
-                {(["queued", "processing", "retrying"].includes(task.status)) && (
+    <StudioShell
+      title="Clip review"
+      subtitle="Preview generated moments. Download final clips."
+      actions={
+        <div className="flex items-center gap-2">
+          <Link href="/list">
+            <Button variant="outline" className="hidden bg-white sm:inline-flex">
+              <ArrowLeft className="h-4 w-4" />
+              Projects
+            </Button>
+          </Link>
+          <Button variant="outline" className="border-red-200 bg-white text-red-700 hover:bg-red-50" onClick={() => setShowDeleteTaskDialog(true)}>
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        </div>
+      }
+    >
+      <div className="space-y-6">
+        <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+            <div className="min-w-0 flex-1">
+              {isEditingTitle ? (
+                <div className="flex max-w-3xl gap-2">
+                  <Input
+                    value={editedTitle}
+                    onChange={(event) => setEditedTitle(event.target.value)}
+                    className="h-11 rounded-lg text-lg font-bold"
+                    autoFocus
+                  />
+                  <Button onClick={handleEditTitle} disabled={!editedTitle.trim()} className="bg-slate-950 hover:bg-slate-800">
+                    <Check className="h-4 w-4" />
+                  </Button>
                   <Button
-                    size="sm"
                     variant="outline"
-                    onClick={async () => {
-                      await fetch(`${taskApiUrl}/${task.id}/cancel`, {
-                        method: "POST",
-                      });
-                      await fetchTaskStatus();
+                    className="bg-white"
+                    onClick={() => {
+                      setIsEditingTitle(false);
+                      setEditedTitle(task.source_title);
                     }}
                   >
-                    Cancel
+                    <X className="h-4 w-4" />
                   </Button>
-                )}
-                {(task.status === "cancelled" || task.status === "error") && (
+                </div>
+              ) : (
+                <div className="flex flex-wrap items-center gap-3">
+                  <h2 className="font-[var(--font-syne)] text-2xl font-bold text-slate-950">{task.source_title}</h2>
                   <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={handleResumeTask}
-                    disabled={isResuming}
+                    size="icon"
+                    variant="ghost"
+                    className="h-8 w-8"
+                    onClick={() => {
+                      setIsEditingTitle(true);
+                      setEditedTitle(task.source_title);
+                    }}
                   >
-                    <RefreshCw className={`w-4 h-4 ${isResuming ? "animate-spin" : ""}`} />
-                    {isResuming ? "Resuming" : task.resume_action_label || "Resume"}
+                    <Edit2 className="h-4 w-4" />
                   </Button>
-                )}
+                </div>
+              )}
+
+              <div className="mt-3 flex flex-wrap items-center gap-3 text-sm text-slate-500">
+                <StatusBadge status={task.status} />
+                <span className="capitalize">{task.source_type}</span>
+                <span className="inline-flex items-center gap-1">
+                  <Clock3 className="h-4 w-4" />
+                  {new Date(task.created_at).toLocaleDateString(undefined, {
+                    year: "numeric",
+                    month: "short",
+                    day: "numeric",
+                  })}
+                </span>
+                <span>{clips.length} clips</span>
               </div>
             </div>
-          )}
-        </div>
-      </div>
 
-      {/* Main Content */}
-      <div className="max-w-6xl mx-auto px-4 py-8">
+            <div className="flex flex-wrap gap-2">
+              {activeStatuses.includes(task.status) && (
+                <Button variant="outline" className="bg-white" onClick={handleCancelTask}>
+                  Cancel
+                </Button>
+              )}
+              {(task.status === "cancelled" || task.status === "error") && (
+                <Button variant="outline" className="bg-white" onClick={handleResumeTask} disabled={isResuming}>
+                  <RefreshCw className={cn("h-4 w-4", isResuming && "animate-spin")} />
+                  {isResuming ? "Resuming" : task.resume_action_label || "Resume"}
+                </Button>
+              )}
+              {task.status === "completed" && clips.length > 0 && (
+                <Link href={`/tasks/${task.id}/edit`}>
+                  <Button variant="outline" className="bg-white">
+                    <Scissors className="h-4 w-4" />
+                    Open editor
+                  </Button>
+                </Link>
+              )}
+            </div>
+          </div>
+        </section>
+
         {actionError && (
-          <Alert className="mb-6 border-red-200 bg-red-50 text-red-900">
-            <AlertCircle className="h-4 w-4" />
+          <Alert className="border-red-200 bg-red-50">
+            <AlertCircle className="h-4 w-4 text-red-600" />
             <AlertDescription>{actionError}</AlertDescription>
           </Alert>
         )}
 
-        {task?.status === "processing" || task?.status === "queued" || task?.status === "retrying" ? (
-          <div className="space-y-8">
-            {/* Progress indicator */}
-            <div className="flex flex-col items-center py-8">
-              {/* Minimal animated dots */}
-              <div className="relative group flex items-center gap-1.5 mb-8 cursor-default">
-                <span className="w-2 h-2 bg-neutral-800 rounded-full animate-[pulse_1.4s_ease-in-out_infinite]" />
-                <span className="w-2 h-2 bg-neutral-800 rounded-full animate-[pulse_1.4s_ease-in-out_0.2s_infinite]" />
-                <span className="w-2 h-2 bg-neutral-800 rounded-full animate-[pulse_1.4s_ease-in-out_0.4s_infinite]" />
-                <div className="absolute top-full mt-3 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-md border bg-popover px-3 py-1.5 text-sm text-popover-foreground shadow-md opacity-0 scale-95 transition-all group-hover:opacity-100 group-hover:scale-100 pointer-events-none">
-                  ☕&nbsp;&nbsp;Grab a coffee, and come back to ready-to-post clips.
-                </div>
-              </div>
-
-              {/* Status message */}
-              <p className="shimmer text-neutral-600/60 text-sm tracking-wide mb-8">
-                {progressMessage || (task.status === "queued" ? "Waiting in queue" : task.status === "retrying" ? "Waiting to retry" : "Processing")}
-              </p>
-
-              {/* Minimal progress bar */}
-              {progress > 0 && (
-                <div className="w-48">
-                  <div className="h-px bg-neutral-200 w-full relative overflow-hidden">
-                    <div
-                      className="absolute inset-y-0 left-0 bg-neutral-800 transition-all duration-700 ease-out"
-                      style={{ width: `${progress}%` }}
-                    />
-                  </div>
-                  <p className="text-[11px] text-neutral-400 text-center mt-3 tabular-nums">{progress}%</p>
-                </div>
-              )}
-            </div>
-
-            <div className="flex justify-center">
-              <ProcessingStageList
-                stages={processingStages}
-                currentMessage={progressMessage || task.progress_message || ""}
-                clipsReady={clips.length}
-              />
-            </div>
-
-            {/* Live clips grid — shows clips as they render */}
-            {clips.length > 0 && (
-              <div className="grid gap-6">
-                <p className="text-sm text-neutral-500 text-center">
-                  {clips.length} clip{clips.length !== 1 ? "s" : ""} ready
-                </p>
-                {clips.map((clip) => (
-                  <Card key={clip.id} className="overflow-hidden">
-                    <CardContent className="p-0">
-                      <div className="flex flex-col lg:flex-row">
-                        <div className="relative flex-shrink-0 bg-black rounded-lg overflow-hidden m-3">
-                          <DynamicVideoPlayer src={getClipUrl(clip.video_url)} poster="/placeholder-video.jpg" />
-                        </div>
-                        <div className="p-6 flex-1">
-                          <div className="flex items-start justify-between mb-4">
-                            <div>
-                              <h3 className="font-semibold text-lg text-black mb-1">Clip {clip.clip_order}</h3>
-                              <div className="flex items-center gap-2 text-sm text-gray-600">
-                                <span>{clip.start_time} - {clip.end_time}</span>
-                                <span>•</span>
-                                <span>{formatDuration(clip.duration)}</span>
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              {clip.virality_score > 0 && (
-                                <Badge className={`${getViralityBgColor(clip.virality_score)} text-white`}>
-                                  <Zap className="w-3 h-3 mr-1" />
-                                  {clip.virality_score}
-                                </Badge>
-                              )}
-                              <Badge className={getScoreColor(clip.relevance_score)}>
-                                <Star className="w-3 h-3 mr-1" />
-                                {(clip.relevance_score * 100).toFixed(0)}%
-                              </Badge>
-                            </div>
-                          </div>
-                          {clip.text && (
-                            <div className="mb-4">
-                              <h4 className="font-medium text-black mb-2">Transcript</h4>
-                              <p className="text-sm text-gray-700 bg-gray-50 p-3 rounded">{clip.text}</p>
-                            </div>
-                          )}
-                          <Button size="sm" variant="outline" asChild>
-                            <a href={getClipUrl(clip.video_url)} download={clip.filename}>
-                              <Download className="w-4 h-4" />
-                              Download
-                            </a>
-                          </Button>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-            )}
-          </div>
-        ) : !task ? (
-          <div className="flex flex-col items-center justify-center min-h-[50vh] py-16">
-            <div className="flex items-center gap-1.5">
-              <span className="w-2 h-2 bg-neutral-300 rounded-full animate-[pulse_1.4s_ease-in-out_infinite]" />
-              <span className="w-2 h-2 bg-neutral-300 rounded-full animate-[pulse_1.4s_ease-in-out_0.2s_infinite]" />
-              <span className="w-2 h-2 bg-neutral-300 rounded-full animate-[pulse_1.4s_ease-in-out_0.4s_infinite]" />
-            </div>
-          </div>
-        ) : task?.status === "analysis_ready" ? (
+        {activeStatuses.includes(task.status) && (
           <div className="space-y-6">
-            <div className="flex flex-col gap-4 border-b border-stone-200 pb-5 md:flex-row md:items-center md:justify-between">
-              <div>
-                <h2 className="text-xl font-semibold text-stone-950">Clip Candidates</h2>
-                <p className="mt-1 text-sm text-stone-500">
-                  Select, preview, and adjust cuts before rendering.
-                </p>
+            <StageRail stages={stages} message={progressMessage || task.progress_message || ""} clipsReady={clips.length} />
+            <div className="rounded-lg border border-cyan-200 bg-cyan-50 p-5">
+              <div className="mb-3 flex items-center justify-between text-sm font-bold text-cyan-900">
+                <span className="flex items-center gap-2">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  {progressMessage || "Generating"}
+                </span>
+                <span>{progress}%</span>
               </div>
-              <div className="flex flex-wrap gap-2">
-                <Button variant="outline" onClick={handleToggleAllCandidates}>
-                  {selectedCandidateOrders.length === (task.clip_candidates || []).length ? "Clear All" : "Select All"}
-                </Button>
+              <Progress value={progress} className="h-2" />
+            </div>
+          </div>
+        )}
+
+        {task.status === "analysis_ready" && (
+          <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
+            <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+              <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h2 className="font-[var(--font-syne)] text-xl font-bold text-slate-950">Candidate review</h2>
+                  <p className="mt-1 text-sm text-slate-500">Pick moments to render. Transcript editing skipped.</p>
+                </div>
                 <Button
+                  className="bg-slate-950 hover:bg-slate-800"
                   onClick={handleRenderCandidates}
                   disabled={selectedCandidateOrders.length === 0 || isRenderingCandidates}
                 >
-                  <Clapperboard className="h-4 w-4" />
-                  {isRenderingCandidates ? "Queueing" : `Render ${selectedCandidateOrders.length}`}
+                  {isRenderingCandidates ? <Loader2 className="h-4 w-4 animate-spin" /> : <Film className="h-4 w-4" />}
+                  Render {selectedCandidateOrders.length}
                 </Button>
               </div>
-            </div>
 
-            <ProcessingStageList
-              stages={processingStages}
-              currentMessage={task.progress_message || "Analysis complete"}
-              clipsReady={clips.length}
-            />
-
-            {(task.clip_candidates || []).length > 0 && (
-              <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
-                <div className="rounded-lg border border-stone-200 bg-white p-4">
-                  <div className="mb-3 flex items-center justify-between gap-3">
-                    <div>
-                      <h3 className="text-sm font-semibold text-stone-950">Source Preview</h3>
-                      <p className="mt-1 text-xs text-stone-500">
-                        Preview starts at {formatDuration(previewStartSeconds)}.
-                      </p>
-                    </div>
-                  </div>
-                  <div className="overflow-hidden rounded-md bg-black">
-                    <video
-                      key={previewStartSeconds}
-                      controls
-                      preload="metadata"
-                      className="h-[360px] w-full object-contain"
-                    >
-                      <source src={getSourcePreviewUrl()} type="video/mp4" />
-                    </video>
-                  </div>
+              {(task.clip_candidates || []).length === 0 ? (
+                <div className="rounded-lg border border-dashed border-slate-200 p-10 text-center">
+                  <AlertCircle className="mx-auto h-10 w-10 text-amber-600" />
+                  <h3 className="mt-4 font-bold text-slate-950">No candidates found</h3>
+                  <p className="mt-2 text-sm text-slate-500">Try another source or adjust settings later.</p>
                 </div>
-                <div className="rounded-lg border border-stone-200 bg-stone-50 p-4">
-                  <h3 className="text-sm font-semibold text-stone-950">Render Queue</h3>
-                  <p className="mt-2 text-sm text-stone-600">
-                    {selectedCandidateOrders.length} selected from {(task.clip_candidates || []).length} candidates.
-                  </p>
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    {selectedCandidateOrders.map((order) => (
-                      <Badge key={order} variant="outline" className="bg-white">
-                        {order}
-                      </Badge>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {(task.clip_candidates || []).length === 0 ? (
-              <Card>
-                <CardContent className="p-8 text-center">
-                  <AlertCircle className="mx-auto mb-3 h-10 w-10 text-yellow-600" />
-                  <h3 className="mb-2 text-lg font-semibold text-stone-950">No candidates found</h3>
-                  <p className="text-sm text-stone-600">Try another video or adjust analysis settings later.</p>
-                </CardContent>
-              </Card>
-            ) : (
-              <div className="grid gap-4">
-                {(task.clip_candidates || []).map((candidate) => {
-                  const selected = selectedCandidateOrders.includes(candidate.candidate_order);
-                  const draft = candidateDrafts[candidate.candidate_order] || {
-                    ...candidate,
-                    text: candidate.text || "",
-                    reasoning: candidate.reasoning || "",
-                  };
-                  return (
-                    <Card key={candidate.candidate_order} className={selected ? "border-stone-900" : ""}>
-                      <CardContent className="p-5">
-                        <div className="flex items-start gap-4">
+              ) : (
+                <div className="space-y-3">
+                  {(task.clip_candidates || []).map((candidate) => {
+                    const selected = selectedCandidateOrders.includes(candidate.candidate_order);
+                    return (
+                      <div
+                        key={candidate.candidate_order}
+                        className={cn(
+                          "rounded-lg border p-4 transition",
+                          selected ? "border-cyan-300 bg-cyan-50/60" : "border-slate-200 bg-white hover:border-cyan-200",
+                        )}
+                      >
+                        <div className="flex items-start gap-3">
                           <Checkbox
                             checked={selected}
                             onCheckedChange={() => handleToggleCandidate(candidate.candidate_order)}
-                            aria-label={`Select candidate ${candidate.candidate_order}`}
                             className="mt-1"
+                            aria-label={`Select candidate ${candidate.candidate_order}`}
                           />
                           <div className="min-w-0 flex-1">
-                            <div className="mb-2 flex flex-wrap items-center gap-2">
-                              <h3 className="font-semibold text-stone-950">Candidate {candidate.candidate_order}</h3>
-                              <Badge variant="outline">
-                                {draft.start_time} - {draft.end_time}
+                            <div className="flex flex-wrap items-center gap-2">
+                              <h3 className="font-bold text-slate-950">Candidate {candidate.candidate_order}</h3>
+                              <Badge variant="outline" className="bg-white">
+                                {candidate.start_time} - {candidate.end_time}
                               </Badge>
                               {typeof candidate.virality_score === "number" && candidate.virality_score > 0 && (
-                                <Badge className={`${getViralityBgColor(candidate.virality_score)} text-white`}>
+                                <Badge variant="outline" className="border-lime-200 bg-lime-50 text-lime-700">
                                   <Zap className="mr-1 h-3 w-3" />
                                   {candidate.virality_score}
                                 </Badge>
                               )}
                               {typeof candidate.relevance_score === "number" && (
-                                <Badge className={getScoreColor(candidate.relevance_score)}>
+                                <Badge variant="outline" className={scoreColor(candidate.relevance_score)}>
                                   <Star className="mr-1 h-3 w-3" />
                                   {(candidate.relevance_score * 100).toFixed(0)}%
                                 </Badge>
                               )}
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => setPreviewStartSeconds(parseTimestampToSeconds(draft.start_time))}
-                              >
-                                <Play className="h-4 w-4" />
-                                Preview
-                              </Button>
                             </div>
-                            <div className="mb-3 grid gap-3 sm:grid-cols-2">
-                              <label className="text-xs font-medium text-stone-600">
-                                Start
-                                <Input
-                                  value={draft.start_time}
-                                  onChange={(event) =>
-                                    handleUpdateCandidateDraft(
-                                      candidate.candidate_order,
-                                      "start_time",
-                                      event.target.value,
-                                    )
-                                  }
-                                  className="mt-1"
-                                  placeholder="00:10"
-                                />
-                              </label>
-                              <label className="text-xs font-medium text-stone-600">
-                                End
-                                <Input
-                                  value={draft.end_time}
-                                  onChange={(event) =>
-                                    handleUpdateCandidateDraft(
-                                      candidate.candidate_order,
-                                      "end_time",
-                                      event.target.value,
-                                    )
-                                  }
-                                  className="mt-1"
-                                  placeholder="00:42"
-                                />
-                              </label>
-                            </div>
-                            <label className="mb-3 block text-xs font-medium text-stone-600">
-                              Transcript
-                              <Textarea
-                                value={draft.text}
-                                onChange={(event) =>
-                                  handleUpdateCandidateDraft(
-                                    candidate.candidate_order,
-                                    "text",
-                                    event.target.value,
-                                  )
-                                }
-                                className="mt-1 min-h-24 resize-y text-sm leading-6"
-                              />
-                            </label>
-                            <label className="block text-xs font-medium text-stone-600">
-                              Reason
-                              <Textarea
-                                value={draft.reasoning}
-                                onChange={(event) =>
-                                  handleUpdateCandidateDraft(
-                                    candidate.candidate_order,
-                                    "reasoning",
-                                    event.target.value,
-                                  )
-                                }
-                                className="mt-1 min-h-20 resize-y text-sm leading-6"
-                              />
-                            </label>
+                            {candidate.text && (
+                              <p className="mt-3 line-clamp-3 text-sm leading-6 text-slate-600">{candidate.text}</p>
+                            )}
+                            {candidate.reasoning && (
+                              <p className="mt-2 text-xs font-medium text-slate-400">{candidate.reasoning}</p>
+                            )}
                           </div>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        ) : task?.status === "error" || task?.status === "cancelled" ? (
-          <div className="space-y-6">
-            <Card>
-              <CardContent className="p-6">
-                <div className="flex flex-col gap-5 md:flex-row md:items-start md:justify-between">
-                  <div className="flex gap-4">
-                    <div
-                      className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full ${
-                        task.status === "error" ? "bg-red-50 text-red-600" : "bg-stone-100 text-stone-700"
-                      }`}
-                    >
-                      <AlertCircle className="h-6 w-6" />
-                    </div>
-                    <div>
-                      <div className="mb-2 flex flex-wrap items-center gap-2">
-                        <h2 className="text-xl font-semibold text-stone-950">
-                          {task.status === "error" ? "Processing Failed" : "Processing Cancelled"}
-                        </h2>
-                        {task.error_code && (
-                          <Badge variant="outline" className="border-red-200 bg-red-50 text-red-700">
-                            {task.error_code}
-                          </Badge>
-                        )}
-                        {task.resume_from_stage && (
-                          <Badge variant="outline" className="border-stone-200 bg-stone-50 text-stone-700">
-                            Resume: {task.resume_from_stage}
-                          </Badge>
-                        )}
-                      </div>
-                      <p className="max-w-3xl whitespace-pre-wrap break-words text-sm leading-6 text-stone-700">
-                        {getTaskFailureMessage(task)}
-                      </p>
-                      <p className="mt-3 text-xs text-stone-500">
-                        Last update: {new Date(task.updated_at).toLocaleString()}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex shrink-0 flex-wrap gap-2">
-                    <Button
-                      variant="outline"
-                      onClick={handleResumeTask}
-                      disabled={isResuming}
-                    >
-                      <RefreshCw className={`h-4 w-4 ${isResuming ? "animate-spin" : ""}`} />
-                      {isResuming
-                        ? "Resuming"
-                        : task.resume_action_label || (task.status === "error" ? "Retry" : "Resume")}
-                    </Button>
-                    <Link href="/">
-                      <Button variant="outline">
-                        <ArrowLeft className="h-4 w-4" />
-                        New Task
-                      </Button>
-                    </Link>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            <ProcessingStageList
-              stages={processingStages}
-              currentMessage={getTaskFailureMessage(task)}
-              clipsReady={clips.length}
-            />
-
-            {task.dead_letter && (
-              <Alert className="border-red-200 bg-red-50 text-red-900">
-                <AlertCircle className="h-4 w-4" />
-                <AlertDescription>
-                  Worker exhausted retries
-                  {task.dead_letter_payload?.tries ? ` (${task.dead_letter_payload.tries} attempts)` : ""}.
-                  {task.dead_letter_payload?.error ? ` ${task.dead_letter_payload.error}` : ""}
-                </AlertDescription>
-              </Alert>
-            )}
-
-            {clips.length > 0 && (
-              <div className="grid gap-6">
-                <p className="text-sm text-neutral-500">
-                  {clips.length} partial clip{clips.length !== 1 ? "s" : ""} saved before failure
-                </p>
-                {clips.map((clip) => (
-                  <Card key={clip.id} className="overflow-hidden">
-                    <CardContent className="p-0">
-                      <div className="flex flex-col lg:flex-row">
-                        <div className="relative m-3 flex-shrink-0 overflow-hidden rounded-lg bg-black">
-                          <DynamicVideoPlayer src={getClipUrl(clip.video_url)} poster="/placeholder-video.jpg" />
-                        </div>
-                        <div className="flex-1 p-6">
-                          <div className="mb-4 flex items-start justify-between">
-                            <div>
-                              <h3 className="mb-1 text-lg font-semibold text-black">Clip {clip.clip_order}</h3>
-                              <div className="flex items-center gap-2 text-sm text-gray-600">
-                                <span>{clip.start_time} - {clip.end_time}</span>
-                                <span>•</span>
-                                <span>{formatDuration(clip.duration)}</span>
-                              </div>
-                            </div>
-                            <Badge className={getScoreColor(clip.relevance_score)}>
-                              <Star className="mr-1 h-3 w-3" />
-                              {(clip.relevance_score * 100).toFixed(0)}%
-                            </Badge>
-                          </div>
-                          {clip.text && (
-                            <div className="mb-4">
-                              <h4 className="mb-2 font-medium text-black">Transcript</h4>
-                              <p className="rounded bg-gray-50 p-3 text-sm text-gray-700">{clip.text}</p>
-                            </div>
-                          )}
-                          <Button size="sm" variant="outline" asChild>
-                            <a href={getClipUrl(clip.video_url)} download={clip.filename}>
-                              <Download className="h-4 w-4" />
-                              Download
-                            </a>
+                          <Button
+                            variant="outline"
+                            className="bg-white"
+                            onClick={() => setPreviewStartSeconds(parseTimestampToSeconds(candidate.start_time))}
+                          >
+                            <Play className="h-4 w-4" />
+                            Preview
                           </Button>
                         </div>
                       </div>
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-            )}
-          </div>
-        ) : clips.length === 0 ? (
-          <Card>
-            <CardContent className="p-8 text-center">
-              {task?.status === "completed" ? (
-                <>
-                  <div className="text-yellow-600 mb-4">
-                    <AlertCircle className="w-12 h-12 mx-auto mb-2" />
-                    <h2 className="text-xl font-semibold">No Clips Generated</h2>
-                  </div>
-                  <p className="text-gray-600 mb-4">
-                    The task completed but no clips were generated. The video may not have had suitable content for
-                    clipping.
-                  </p>
-                  <Link href="/">
-                    <Button>
-                      <ArrowLeft className="w-4 h-4" />
-                      Try Another Video
-                    </Button>
-                  </Link>
-                </>
-              ) : (
-                <>
-                  <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                    <Clock className="w-8 h-8 text-blue-500 animate-pulse" />
-                  </div>
-                  <h2 className="text-xl font-semibold text-black mb-2">Still Generating...</h2>
-                  <p className="text-gray-600">
-                    Your clips are being generated. This page will refresh automatically when they&apos;re ready.
-                  </p>
-                </>
-              )}
-            </CardContent>
-          </Card>
-        ) : (
-          <div className="grid gap-6">
-            <div className="flex items-center justify-between">
-              <Button variant="outline" size="sm" onClick={() => setSettingsSheetOpen(true)}>
-                <Settings2 className="w-4 h-4" />
-                Project Settings
-              </Button>
-              {selectedClipIds.length >= 2 && (
-                <Button variant="outline" size="sm" onClick={handleMergeClips}>
-                  <GitMerge className="w-4 h-4" />
-                  Merge Selected ({selectedClipIds.length})
-                </Button>
+                    );
+                  })}
+                </div>
               )}
             </div>
 
-            <Sheet open={settingsSheetOpen} onOpenChange={setSettingsSheetOpen}>
-              <SheetContent side="right" className="sm:max-w-md overflow-y-auto">
-                <SheetHeader>
-                  <SheetTitle className="flex items-center gap-2">
-                    <Settings2 className="w-4 h-4" />
-                    Project Settings
-                  </SheetTitle>
-                  <SheetDescription>
-                    Configure font, caption, and B-roll settings for this task&apos;s clips.
-                  </SheetDescription>
-                </SheetHeader>
-
-                <div className="space-y-5 px-4">
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-medium text-gray-500">Font</label>
-                    <Select value={projectFontFamily} onValueChange={setProjectFontFamily}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Font family" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {availableFonts.map((font) => (
-                          <SelectItem key={font.name} value={font.name}>
-                            <span className="flex items-center gap-2">
-                              <Type className="w-3 h-3" />
-                              {font.display_name}
-                            </span>
-                          </SelectItem>
-                        ))}
-                        {availableFonts.length === 0 && (
-                          <SelectItem value="TikTokSans-Regular">TikTok Sans Regular</SelectItem>
-                        )}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-medium text-gray-500">Size</label>
-                    <Input
-                      type="number"
-                      min={12}
-                      max={72}
-                      value={projectFontSize}
-                      onChange={(e) => setProjectFontSize(e.target.value)}
-                      placeholder="Font size"
-                    />
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-medium text-gray-500">Color</label>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="color"
-                        value={projectFontColor}
-                        onChange={(e) => setProjectFontColor(e.target.value)}
-                        className="h-9 w-9 rounded border border-gray-300 cursor-pointer"
-                      />
-                      <Input
-                        value={projectFontColor}
-                        onChange={(e) => setProjectFontColor(e.target.value)}
-                        placeholder="#FFFFFF"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-medium text-gray-500">Caption Template</label>
-                    <Select value={projectCaptionTemplate} onValueChange={setProjectCaptionTemplate}>
-                      <SelectTrigger>
-                        <SelectValue>
-                          {availableTemplates.find((t) => t.id === projectCaptionTemplate)?.name || "Select style"}
-                        </SelectValue>
-                      </SelectTrigger>
-                      <SelectContent>
-                        {availableTemplates.map((template) => (
-                          <SelectItem key={template.id} value={template.id}>
-                            <div>
-                              <div className="font-medium">{template.name}</div>
-                              <div className="text-xs text-gray-500">{template.description}</div>
-                            </div>
-                          </SelectItem>
-                        ))}
-                        {availableTemplates.length === 0 && <SelectItem value="default">Default</SelectItem>}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <label className="flex items-center gap-2 text-sm text-gray-700">
-                    <input
-                      type="checkbox"
-                      checked={projectIncludeBroll}
-                      onChange={(e) => setProjectIncludeBroll(e.target.checked)}
-                      className="rounded"
-                    />
-                    Include B-roll
-                  </label>
-
-                  <div className="rounded-lg border bg-gray-50 p-3 space-y-3">
-                    <div>
-                      <div className="text-sm font-medium text-gray-900">Clip cleanup</div>
-                      <div className="text-xs text-gray-500">Apply silence and filler-word cuts to regenerated clips.</div>
-                    </div>
-
-                    <label className="flex items-center gap-2 text-sm text-gray-700">
-                      <input
-                        type="checkbox"
-                        checked={projectCutLongPauses}
-                        onChange={(e) => setProjectCutLongPauses(e.target.checked)}
-                        className="rounded"
-                      />
-                      Cut long pauses
-                    </label>
-
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-medium text-gray-500">Pause threshold (ms)</label>
-                      <Input
-                        type="number"
-                        min={250}
-                        max={3000}
-                        step={50}
-                        value={projectPauseThresholdMs}
-                        onChange={(e) => setProjectPauseThresholdMs(e.target.value)}
-                        disabled={!projectCutLongPauses}
-                      />
-                    </div>
-
-                    <label className="flex items-center gap-2 text-sm text-gray-700">
-                      <input
-                        type="checkbox"
-                        checked={projectRemoveFillerWords}
-                        onChange={(e) => setProjectRemoveFillerWords(e.target.checked)}
-                        className="rounded"
-                      />
-                      Remove filler words
-                    </label>
-
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-medium text-gray-500">Extra filtered words or phrases</label>
-                      <Input
-                        value={projectFilteredWords}
-                        onChange={(e) => setProjectFilteredWords(e.target.value)}
-                        placeholder="basically, literally, to be honest"
-                      />
-                    </div>
-                  </div>
+            <aside className="space-y-6">
+              <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+                <h2 className="font-[var(--font-syne)] text-xl font-bold text-slate-950">Source preview</h2>
+                <p className="mt-1 text-sm text-slate-500">Starts at {formatDuration(previewStartSeconds)}.</p>
+                <div className="mt-4 overflow-hidden rounded-lg bg-slate-950">
+                  <video key={previewStartSeconds} controls preload="metadata" className="aspect-video w-full object-contain">
+                    <source src={getSourcePreviewUrl()} type="video/mp4" />
+                  </video>
                 </div>
+              </div>
+              <StageRail stages={stages} message={task.progress_message || "Analysis complete"} clipsReady={clips.length} />
+            </aside>
+          </section>
+        )}
 
-                <SheetFooter>
-                  <Button
-                    className="w-full"
-                    onClick={() => {
-                      handleApplyProjectSettings();
-                      setSettingsSheetOpen(false);
-                    }}
-                    disabled={isApplyingSettings}
-                  >
-                    {isApplyingSettings ? "Applying..." : "Apply to All Clips"}
-                  </Button>
-                </SheetFooter>
-              </SheetContent>
-            </Sheet>
+        {(task.status === "error" || task.status === "cancelled") && (
+          <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+              <div className="flex gap-4">
+                <span className={cn("flex h-11 w-11 items-center justify-center rounded-lg", task.status === "error" ? "bg-red-50 text-red-600" : "bg-slate-100 text-slate-600")}>
+                  <AlertCircle className="h-6 w-6" />
+                </span>
+                <div>
+                  <h2 className="font-[var(--font-syne)] text-xl font-bold text-slate-950">
+                    {task.status === "error" ? "Generation failed" : "Generation cancelled"}
+                  </h2>
+                  <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-600">{failureMessage}</p>
+                  {task.resume_from_stage && (
+                    <Badge variant="outline" className="mt-3 border-slate-200 bg-slate-50">
+                      Resume: {task.resume_from_stage}
+                    </Badge>
+                  )}
+                </div>
+              </div>
+              <Button variant="outline" className="bg-white" onClick={handleResumeTask} disabled={isResuming}>
+                <RefreshCw className={cn("h-4 w-4", isResuming && "animate-spin")} />
+                {isResuming ? "Resuming" : task.resume_action_label || "Retry"}
+              </Button>
+            </div>
+          </section>
+        )}
 
-            {clips.map((clip) => (
-              <Card key={clip.id} className="overflow-hidden">
-                <CardContent className="p-0">
-                  <div className="flex flex-col lg:flex-row">
-                    {/* Video Player */}
-                    <div className="relative flex-shrink-0 bg-black rounded-lg overflow-hidden m-3">
-                      <DynamicVideoPlayer src={getClipUrl(clip.video_url)} poster="/placeholder-video.jpg" />
-                    </div>
+        {task.status === "completed" && clips.length === 0 && (
+          <section className="rounded-lg border border-slate-200 bg-white p-12 text-center shadow-sm">
+            <Sparkles className="mx-auto h-10 w-10 text-amber-600" />
+            <h2 className="mt-4 font-[var(--font-syne)] text-2xl font-bold text-slate-950">No clips generated</h2>
+            <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-slate-500">
+              Task finished, but backend found no usable moments.
+            </p>
+            <Link href="/" className="mt-6 inline-block">
+              <Button className="bg-slate-950 hover:bg-slate-800">Try another video</Button>
+            </Link>
+          </section>
+        )}
 
-                    {/* Clip Details */}
-                    <div className="p-6 flex-1">
-                      <div className="flex items-start justify-between mb-4">
-                        <div>
-                          <label className="flex items-center gap-2 text-xs text-gray-600 mb-2">
-                            <input
-                              type="checkbox"
-                              checked={selectedClipIds.includes(clip.id)}
-                              onChange={() => handleToggleClipSelection(clip.id)}
-                            />
-                            Select for merge
-                          </label>
-                          <h3 className="font-semibold text-lg text-black mb-1">Clip {clip.clip_order}</h3>
-                          <div className="flex items-center gap-2 text-sm text-gray-600">
-                            <span>
-                              {clip.start_time} - {clip.end_time}
-                            </span>
-                            <span>•</span>
-                            <span>{formatDuration(clip.duration)}</span>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          {/* Virality Score Badge */}
-                          {clip.virality_score > 0 && (
-                            <Badge className={`${getViralityBgColor(clip.virality_score)} text-white`}>
-                              <Zap className="w-3 h-3 mr-1" />
-                              {clip.virality_score}
-                            </Badge>
-                          )}
-                          <Badge className={getScoreColor(clip.relevance_score)}>
-                            <Star className="w-3 h-3 mr-1" />
-                            {(clip.relevance_score * 100).toFixed(0)}%
+        {clips.length > 0 && (
+          <section className="grid gap-6 xl:grid-cols-[minmax(0,430px)_1fr]">
+            <div className="rounded-lg border border-slate-200 bg-slate-950 p-4 shadow-sm">
+              <div className="relative mx-auto aspect-[9/16] max-h-[720px] overflow-hidden rounded-lg bg-black">
+                {activeClip ? (
+                  <DynamicVideoPlayer src={getClipUrl(activeClip.video_url)} poster="/placeholder-video.jpg" />
+                ) : (
+                  <div className="flex h-full items-center justify-center text-white">No preview</div>
+                )}
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-slate-200 bg-white shadow-sm">
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 p-5">
+                <div>
+                  <h2 className="font-[var(--font-syne)] text-xl font-bold text-slate-950">Generated clips</h2>
+                  <p className="mt-1 text-sm text-slate-500">Preview, inspect score, download MP4.</p>
+                </div>
+                <Badge variant="outline" className="border-lime-200 bg-lime-50 text-lime-700">
+                  <CheckCircle2 className="mr-1 h-3 w-3" />
+                  {clips.length} ready
+                </Badge>
+              </div>
+
+              <div className="divide-y divide-slate-100">
+                {clips.map((clip) => (
+                  <div key={clip.id} className="grid gap-4 p-5 lg:grid-cols-[1fr_auto]">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h3 className="font-bold text-slate-950">Clip {clip.clip_order}</h3>
+                        <Badge variant="outline" className="bg-white">
+                          {clip.start_time} - {clip.end_time}
+                        </Badge>
+                        <Badge variant="outline" className="bg-white">
+                          {formatDuration(clip.duration)}
+                        </Badge>
+                        {clip.virality_score > 0 && (
+                          <Badge variant="outline" className="border-lime-200 bg-lime-50 text-lime-700">
+                            <Zap className="mr-1 h-3 w-3" />
+                            <span className={viralityColor(clip.virality_score)}>{clip.virality_score}</span>
                           </Badge>
-                        </div>
+                        )}
+                        <Badge variant="outline" className={scoreColor(clip.relevance_score)}>
+                          <Star className="mr-1 h-3 w-3" />
+                          {(clip.relevance_score * 100).toFixed(0)}%
+                        </Badge>
                       </div>
-
-                      {/* Virality Score Breakdown */}
-                      {clip.virality_score > 0 && (
-                        <div className="mb-4 p-3 bg-gray-50 rounded-lg">
-                          <div className="flex items-center justify-between mb-3">
-                            <h4 className="font-medium text-black text-sm flex items-center gap-2">
-                              <Zap className="w-4 h-4" />
-                              Virality Score
-                            </h4>
-                            <span className={`text-lg font-bold ${getViralityColor(clip.virality_score)}`}>
-                              {clip.virality_score}/100
-                            </span>
-                          </div>
-
-                          <div className="grid grid-cols-2 gap-3 text-xs">
-                            {/* Hook Score */}
-                            <div className="space-y-1">
-                              <div className="flex items-center justify-between">
-                                <span className="flex items-center gap-1 text-gray-600">
-                                  <MessageSquare className="w-3 h-3" />
-                                  Hook
-                                </span>
-                                <span className="font-medium">{clip.hook_score}/25</span>
-                              </div>
-                              <Progress value={(clip.hook_score / 25) * 100} className="h-1.5" />
-                            </div>
-
-                            {/* Engagement Score */}
-                            <div className="space-y-1">
-                              <div className="flex items-center justify-between">
-                                <span className="flex items-center gap-1 text-gray-600">
-                                  <TrendingUp className="w-3 h-3" />
-                                  Engagement
-                                </span>
-                                <span className="font-medium">{clip.engagement_score}/25</span>
-                              </div>
-                              <Progress value={(clip.engagement_score / 25) * 100} className="h-1.5" />
-                            </div>
-
-                            {/* Value Score */}
-                            <div className="space-y-1">
-                              <div className="flex items-center justify-between">
-                                <span className="flex items-center gap-1 text-gray-600">
-                                  <Star className="w-3 h-3" />
-                                  Value
-                                </span>
-                                <span className="font-medium">{clip.value_score}/25</span>
-                              </div>
-                              <Progress value={(clip.value_score / 25) * 100} className="h-1.5" />
-                            </div>
-
-                            {/* Shareability Score */}
-                            <div className="space-y-1">
-                              <div className="flex items-center justify-between">
-                                <span className="flex items-center gap-1 text-gray-600">
-                                  <Share2 className="w-3 h-3" />
-                                  Shareability
-                                </span>
-                                <span className="font-medium">{clip.shareability_score}/25</span>
-                              </div>
-                              <Progress value={(clip.shareability_score / 25) * 100} className="h-1.5" />
-                            </div>
-                          </div>
-
-                          {clip.hook_type && clip.hook_type !== "none" && (
-                            <div className="mt-3 pt-2 border-t">
-                              <Badge variant="outline" className="text-xs">
-                                {getHookTypeLabel(clip.hook_type)}
-                              </Badge>
-                            </div>
-                          )}
-                        </div>
-                      )}
 
                       {clip.text && (
-                        <div className="mb-4">
-                          <h4 className="font-medium text-black mb-2">Transcript</h4>
-                          <p className="text-sm text-gray-700 bg-gray-50 p-3 rounded">{clip.text}</p>
+                        <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-4">
+                          <p className="text-xs font-bold uppercase text-slate-400">Transcript</p>
+                          <p className="mt-2 line-clamp-4 text-sm leading-6 text-slate-700">{clip.text}</p>
                         </div>
                       )}
 
-                      <div className="flex items-center gap-2">
-                        <div className="inline-flex items-stretch h-8 rounded-md border border-input bg-background shadow-xs overflow-hidden">
-                          <button
-                            type="button"
-                            onClick={() => handleDownloadClip(clip)}
-                            className="inline-flex items-center gap-1.5 px-3 text-sm font-medium hover:bg-accent transition-colors focus-visible:outline-none focus-visible:bg-accent"
-                          >
-                            <Download className="w-4 h-4" />
-                            Download
-                          </button>
-                          <Select value={exportPreset} onValueChange={setExportPreset}>
-                            <SelectTrigger
-                              size="sm"
-                              aria-label="Download format"
-                              className="h-8 min-w-[112px] rounded-none border-0 border-l border-input shadow-none focus-visible:ring-0 focus-visible:border-input bg-transparent"
-                            >
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent align="end">
-                              <SelectItem value="original">Original</SelectItem>
-                              <SelectItem value="tiktok">TikTok</SelectItem>
-                              <SelectItem value="reels">Reels</SelectItem>
-                              <SelectItem value="shorts">Shorts</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => {
-                            setEditingClipId(editingClipId === clip.id ? null : clip.id);
-                            setCaptionText(clip.text || "");
-                          }}
-                        >
-                          <Scissors className="w-4 h-4" />
-                          Edit
-                        </Button>
-
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          aria-label="Delete clip"
-                          className="ml-auto text-red-600 hover:text-red-700 hover:bg-red-50"
-                          onClick={() => setDeletingClipId(clip.id)}
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </Button>
-                      </div>
-
-                      {editingClipId === clip.id && (
-                        <div className="mt-4 p-3 border rounded-lg space-y-3 bg-gray-50">
-                          <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-                            <Input
-                              value={startOffset}
-                              onChange={(e) => setStartOffset(e.target.value)}
-                              placeholder="Start trim (sec)"
-                            />
-                            <Input
-                              value={endOffset}
-                              onChange={(e) => setEndOffset(e.target.value)}
-                              placeholder="End trim (sec)"
-                            />
-                            <Button size="sm" onClick={() => handleTrimClip(clip.id)}>
-                              <Scissors className="w-4 h-4" />
-                              Trim
-                            </Button>
-                          </div>
-                          <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-                            <Input
-                              value={splitTime}
-                              onChange={(e) => setSplitTime(e.target.value)}
-                              placeholder="Split at (sec)"
-                            />
-                            <Button size="sm" variant="outline" onClick={() => handleSplitClip(clip.id)}>
-                              <SplitSquareVertical className="w-4 h-4" />
-                              Split
-                            </Button>
-                            <Button size="sm" variant="outline" onClick={() => handleTrimClip(clip.id)}>
-                              <RefreshCw className="w-4 h-4" />
-                              Regenerate
-                            </Button>
-                          </div>
-                          <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-                            <Input
-                              value={captionText}
-                              onChange={(e) => setCaptionText(e.target.value)}
-                              placeholder="Caption text"
-                            />
-                            <Select value={captionPosition} onValueChange={setCaptionPosition}>
-                              <SelectTrigger>
-                                <SelectValue placeholder="Caption position" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="top">Top</SelectItem>
-                                <SelectItem value="middle">Middle</SelectItem>
-                                <SelectItem value="bottom">Bottom</SelectItem>
-                              </SelectContent>
-                            </Select>
-                            <Input
-                              value={highlightWords}
-                              onChange={(e) => setHighlightWords(e.target.value)}
-                              placeholder="Highlights: word1, word2"
-                            />
-                          </div>
-                          <Button size="sm" variant="outline" onClick={() => handleUpdateCaptions(clip.id)}>
-                            <Subtitles className="w-4 h-4" />
-                            Update Captions
-                          </Button>
-                        </div>
+                      {clip.reasoning && (
+                        <p className="mt-3 text-sm leading-6 text-slate-500">{clip.reasoning}</p>
                       )}
                     </div>
+
+                    <div className="flex items-start gap-2 lg:justify-end">
+                      <Button className="bg-slate-950 hover:bg-slate-800" onClick={() => handleDownloadClip(clip)}>
+                        <Download className="h-4 w-4" />
+                        Download
+                      </Button>
+                      <Button variant="outline" className="border-red-200 bg-white text-red-700 hover:bg-red-50" onClick={() => setDeletingClipId(clip.id)}>
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
                   </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
+                ))}
+              </div>
+            </div>
+          </section>
         )}
       </div>
 
-      {/* Delete Task Confirmation Dialog */}
-      <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+      <AlertDialog open={showDeleteTaskDialog} onOpenChange={setShowDeleteTaskDialog}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete Generation</AlertDialogTitle>
+            <AlertDialogTitle>Delete project?</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete this generation? This will permanently delete all clips and cannot be
-              undone.
+              This permanently deletes generation and clips.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={handleDeleteTask} disabled={isDeleting} className="bg-red-600 hover:bg-red-700">
-              {isDeleting ? "Deleting..." : "Delete"}
+              {isDeleting ? "Deleting" : "Delete"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Delete Clip Confirmation Dialog */}
-      <AlertDialog open={!!deletingClipId} onOpenChange={(open) => !open && setDeletingClipId(null)}>
+      <AlertDialog open={Boolean(deletingClipId)} onOpenChange={(open) => !open && setDeletingClipId(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete Clip</AlertDialogTitle>
-            <AlertDialogDescription>
-              Are you sure you want to delete this clip? This action cannot be undone.
-            </AlertDialogDescription>
+            <AlertDialogTitle>Delete clip?</AlertDialogTitle>
+            <AlertDialogDescription>This cannot be undone.</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              onClick={() => deletingClipId && handleDeleteClip(deletingClipId)}
+              onClick={() => deletingClipId && void handleDeleteClip(deletingClipId)}
               className="bg-red-600 hover:bg-red-700"
             >
               Delete
@@ -2253,6 +960,6 @@ export default function TaskPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+    </StudioShell>
   );
 }

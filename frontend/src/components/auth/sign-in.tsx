@@ -41,9 +41,9 @@ export function SignIn() {
   };
 
   return (
-    <Card className="w-full max-w-md mx-auto">
+    <Card className="mx-auto w-full max-w-md rounded-lg border-slate-200 bg-white shadow-sm">
       <CardHeader>
-        <CardTitle>Sign In</CardTitle>
+        <CardTitle className="font-[var(--font-syne)] text-2xl">Sign in</CardTitle>
         <CardDescription>Sign in to your account</CardDescription>
       </CardHeader>
       <CardContent>
@@ -64,8 +64,8 @@ export function SignIn() {
             required
             disabled={loading}
           />
-          <Button type="submit" className="w-full" disabled={loading}>
-            {loading ? "Signing In..." : "Sign In"}
+          <Button type="submit" className="w-full bg-slate-950 hover:bg-slate-800" disabled={loading}>
+            {loading ? "Signing in..." : "Sign in"}
           </Button>
         </form>
         {message && (

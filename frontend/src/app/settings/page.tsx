@@ -4,15 +4,15 @@ import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Separator } from "@/components/ui/separator";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
-import { signOut, useSession } from "@/lib/auth-client";
+import { useSession } from "@/lib/auth-client";
 import Link from "next/link";
-import { Type, Palette, CheckCircle, AlertCircle, Settings, ArrowLeft, KeyRound, ChevronRight } from "lucide-react";
+import { Type, Palette, CheckCircle, AlertCircle, Settings, KeyRound, ChevronRight } from "lucide-react";
+import { StudioShell } from "@/components/studio-shell";
 
 interface UserPreferences {
   fontFamily: string;
@@ -30,7 +30,6 @@ export default function SettingsPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
   const { data: session, isPending } = useSession();
-  const isAdmin = Boolean((session?.user as { is_admin?: boolean } | undefined)?.is_admin);
 
   // Load available fonts from backend and inject them into the page
   useEffect(() => {
@@ -131,84 +130,36 @@ export default function SettingsPage() {
     }
   };
 
-  const handleSignOut = async () => {
-    await signOut();
-    window.location.href = "/sign-in";
-  };
-
   if (isPending || isFetching) {
     return (
-      <div className="min-h-screen bg-white flex items-center justify-center p-4">
+      <StudioShell title="Settings" subtitle="Load preferences">
         <div className="space-y-4">
           <Skeleton className="h-4 w-32 mx-auto" />
           <Skeleton className="h-4 w-48 mx-auto" />
           <Skeleton className="h-4 w-24 mx-auto" />
         </div>
-      </div>
+      </StudioShell>
     );
   }
 
   if (!session?.user) {
     return (
-      <div className="min-h-screen bg-white">
-        <div className="max-w-4xl mx-auto px-4 py-24">
-          <div className="text-center">
-            <h1 className="text-3xl font-bold text-black mb-4">
-              Sign In Required
-            </h1>
-            <p className="text-gray-600 mb-8">
-              You need to sign in to access your settings
-            </p>
-            <Link href="/sign-in">
-              <Button size="lg">Sign In</Button>
-            </Link>
-          </div>
+      <StudioShell title="Settings" subtitle="Sign in to access preferences">
+        <div className="mx-auto max-w-lg rounded-lg border border-slate-200 bg-white p-8 text-center shadow-sm">
+          <h1 className="mb-4 font-[var(--font-syne)] text-2xl font-bold text-slate-950">Sign in required</h1>
+          <p className="mb-6 text-sm text-slate-600">You need to sign in to access your settings.</p>
+          <Link href="/sign-in">
+            <Button className="bg-slate-950 hover:bg-slate-800">Sign in</Button>
+          </Link>
         </div>
-      </div>
+      </StudioShell>
     );
   }
 
   return (
-    <div className="min-h-screen bg-white">
-      {/* Header */}
-      <div className="border-b bg-white">
-        <div className="max-w-7xl mx-auto px-4 py-4">
-          <div className="flex justify-between items-center">
-            <Link href="/">
-              <Button variant="ghost" size="sm">
-                <ArrowLeft className="w-4 h-4" />
-                Back
-              </Button>
-            </Link>
-
-            <div className="flex items-center gap-3">
-              {isAdmin && (
-                <Link href="/admin">
-                  <Button variant="outline" size="sm">
-                    Admin
-                  </Button>
-                </Link>
-              )}
-              <Button variant="outline" size="sm" onClick={handleSignOut}>
-                Sign Out
-              </Button>
-              <Avatar className="w-8 h-8">
-                <AvatarImage src={session.user.image || ""} />
-                <AvatarFallback className="bg-gray-100 text-black text-sm">
-                  {session.user.name?.charAt(0) || session.user.email?.charAt(0) || "U"}
-                </AvatarFallback>
-              </Avatar>
-              <div className="hidden sm:block">
-                <p className="text-sm font-medium text-black">{session.user.name}</p>
-                <p className="text-xs text-gray-500">{session.user.email}</p>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
+    <StudioShell title="Settings" subtitle="Configure default clip generation preferences.">
       {/* Main Content */}
-      <div className="max-w-4xl mx-auto px-4 py-16">
+      <div className="mx-auto max-w-4xl">
         <div className="max-w-xl mx-auto">
           <div className="mb-8">
             <div className="flex items-center gap-2 mb-2">
@@ -396,6 +347,6 @@ export default function SettingsPage() {
           </div>
         </div>
       </div>
-    </div>
+    </StudioShell>
   );
 }

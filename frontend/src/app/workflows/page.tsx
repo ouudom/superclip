@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, Check, Copy, Play, Save, Trash2 } from "lucide-react";
+import { Check, Copy, Play, Save, Trash2 } from "lucide-react";
+import { StudioShell } from "@/components/studio-shell";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -209,66 +210,37 @@ export default function WorkflowsPage() {
 
   if (isPending || isLoading) {
     return (
-      <div className="min-h-screen bg-white p-4">
-        <div className="mx-auto max-w-6xl space-y-4">
+      <StudioShell title="Workflows" subtitle="Load presets">
+        <div className="space-y-4">
           <Skeleton className="h-10 w-52" />
           <Skeleton className="h-48 w-full" />
           <Skeleton className="h-48 w-full" />
         </div>
-      </div>
+      </StudioShell>
     );
   }
 
   if (!session?.user) {
     return (
-      <div className="min-h-screen bg-white p-4">
-        <div className="mx-auto max-w-4xl py-24 text-center">
-          <h1 className="mb-4 text-3xl font-bold text-black">Sign In Required</h1>
+      <StudioShell title="Workflows" subtitle="Sign in to manage presets">
+        <div className="mx-auto max-w-lg rounded-lg border border-slate-200 bg-white p-8 text-center shadow-sm">
+          <h1 className="mb-4 font-[var(--font-syne)] text-2xl font-bold text-slate-950">Sign in required</h1>
           <Link href="/sign-in">
-            <Button>Sign In</Button>
+            <Button className="bg-slate-950 hover:bg-slate-800">Sign in</Button>
           </Link>
         </div>
-      </div>
+      </StudioShell>
     );
   }
 
   return (
-    <div className="min-h-screen bg-stone-50">
-      <div className="border-b border-stone-200 bg-white">
-        <div className="mx-auto max-w-6xl px-4 py-5">
-          <div className="mb-4 flex items-center gap-2">
-            <Link href="/">
-              <Button variant="ghost" size="sm">
-                <ArrowLeft className="h-4 w-4" />
-                Back
-              </Button>
-            </Link>
-            <Link href="/library">
-              <Button variant="outline" size="sm">Library</Button>
-            </Link>
-            <Link href="/sources">
-              <Button variant="outline" size="sm">Sources</Button>
-            </Link>
-            <Link href="/publishing">
-              <Button variant="outline" size="sm">Publishing</Button>
-            </Link>
-            <Link href="/agents">
-              <Button variant="outline" size="sm">Agents</Button>
-            </Link>
-          </div>
-          <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-            <div>
-              <h1 className="text-2xl font-bold text-stone-950">Workflow Presets</h1>
-              <p className="mt-1 text-sm text-stone-500">
-                Save repeatable source-to-candidate patterns with model, prompt, and render settings.
-              </p>
-            </div>
-            <Button onClick={createNew}>New Workflow</Button>
-          </div>
-        </div>
-      </div>
+    <StudioShell
+      title="Workflows"
+      subtitle="Save repeatable source-to-candidate patterns with model, prompt, and render settings."
+      actions={<Button onClick={createNew} className="bg-slate-950 hover:bg-slate-800">New workflow</Button>}
+    >
 
-      <main className="mx-auto grid max-w-6xl gap-5 px-4 py-6 lg:grid-cols-[320px_minmax(0,1fr)]">
+      <main className="grid gap-5 lg:grid-cols-[320px_minmax(0,1fr)]">
         <div className="space-y-3">
           {workflows.map((workflow) => (
             <button
@@ -392,6 +364,6 @@ export default function WorkflowsPage() {
           </Card>
         </div>
       </main>
-    </div>
+    </StudioShell>
   );
 }

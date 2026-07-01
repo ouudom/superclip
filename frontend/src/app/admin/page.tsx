@@ -3,6 +3,7 @@ import { headers } from "next/headers";
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { AdminUserToggle } from "@/components/admin/admin-user-toggle";
+import { StudioShell } from "@/components/studio-shell";
 import {
   RuntimeSettingsForm,
   type RuntimeSetting,
@@ -29,13 +30,14 @@ export default async function AdminPage({
 
   if (!session?.user) {
     return (
-      <main className="mx-auto max-w-2xl px-6 py-16">
-        <h1 className="text-2xl font-semibold">Admin</h1>
+      <StudioShell title="Admin" subtitle="Sign in required">
+        <main className="mx-auto max-w-2xl rounded-lg border border-slate-200 bg-white p-8 shadow-sm">
         <p className="mt-3 text-sm text-gray-600">You need to sign in to view this page.</p>
         <Link href="/sign-in" className="mt-6 inline-block text-sm font-medium text-black underline">
           Go to sign in
         </Link>
-      </main>
+        </main>
+      </StudioShell>
     );
   }
 
@@ -43,10 +45,11 @@ export default async function AdminPage({
 
   if (!isAdmin) {
     return (
-      <main className="mx-auto max-w-2xl px-6 py-16">
-        <h1 className="text-2xl font-semibold">Admin</h1>
+      <StudioShell title="Admin" subtitle="Permission required">
+        <main className="mx-auto max-w-2xl rounded-lg border border-slate-200 bg-white p-8 shadow-sm">
         <p className="mt-3 text-sm text-gray-600">You are signed in, but your account is not an admin.</p>
-      </main>
+        </main>
+      </StudioShell>
     );
   }
 
@@ -189,16 +192,8 @@ export default async function AdminPage({
   const generationCountByUser = new Map(tasksByUser.map((item) => [item.user_id, item._count._all]));
 
   return (
-    <main className="mx-auto max-w-6xl px-6 py-10">
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-semibold">Admin Dashboard</h1>
-          <p className="mt-2 text-sm text-gray-600">Manage users and monitor overall platform activity.</p>
-        </div>
-        <Link href="/" className="text-sm font-medium text-black underline">
-          Back to app
-        </Link>
-      </div>
+    <StudioShell title="Admin" subtitle="Manage users and monitor overall platform activity.">
+    <main className="space-y-8">
 
       <section className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <div className="rounded-lg border border-gray-200 bg-white p-4">
@@ -422,5 +417,6 @@ export default async function AdminPage({
         )}
       </section>
     </main>
+    </StudioShell>
   );
 }

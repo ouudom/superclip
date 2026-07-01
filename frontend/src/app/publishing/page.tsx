@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, Check, Copy, Download, ExternalLink, RefreshCw, Save } from "lucide-react";
+import { Check, Copy, Download, ExternalLink, RefreshCw, Save } from "lucide-react";
+import { StudioShell } from "@/components/studio-shell";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -238,52 +239,36 @@ export default function PublishingPage() {
 
   if (isPending || isLoading) {
     return (
-      <main className="min-h-screen bg-stone-50 p-6">
-        <div className="mx-auto max-w-7xl space-y-4">
+      <StudioShell title="Exports" subtitle="Load publishing queue">
+        <div className="space-y-4">
           <Skeleton className="h-10 w-56" />
           <Skeleton className="h-40 w-full" />
           <Skeleton className="h-96 w-full" />
         </div>
-      </main>
+      </StudioShell>
     );
   }
 
   if (!session?.user) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-stone-50 p-6">
-        <Card className="max-w-md">
-          <CardContent className="space-y-4 p-6">
-            <p className="text-sm text-stone-600">Sign in to manage publishing.</p>
-            <Link href="/sign-in">
-              <Button>Sign in</Button>
-            </Link>
-          </CardContent>
-        </Card>
-      </main>
+      <StudioShell title="Exports" subtitle="Sign in to manage publishing">
+        <div className="mx-auto max-w-lg rounded-lg border border-slate-200 bg-white p-8 text-center shadow-sm">
+          <p className="mb-4 text-sm text-slate-600">Sign in to manage publishing.</p>
+          <Link href="/sign-in">
+            <Button className="bg-slate-950 hover:bg-slate-800">Sign in</Button>
+          </Link>
+        </div>
+      </StudioShell>
     );
   }
 
   return (
-    <main className="min-h-screen bg-stone-50 text-stone-950">
-      <div className="mx-auto max-w-7xl px-6 py-6">
-        <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <Link href="/">
-              <Button variant="outline" size="sm">
-                <ArrowLeft className="mr-2 h-4 w-4" />
-                Home
-              </Button>
-            </Link>
-            <div>
-              <h1 className="text-2xl font-semibold">Publishing</h1>
-              <p className="text-sm text-stone-500">Manual export, captions, checklist, posted URL.</p>
-            </div>
-          </div>
-          <Button variant="outline" size="sm" onClick={() => void loadItems()}>
-            <RefreshCw className="mr-2 h-4 w-4" />
-            Refresh
-          </Button>
-        </div>
+    <StudioShell
+      title="Exports"
+      subtitle="Manual export, captions, checklist, posted URL."
+      actions={<Button variant="outline" className="bg-white" onClick={() => void loadItems()}><RefreshCw className="h-4 w-4" />Refresh</Button>}
+    >
+      <main className="space-y-6">
 
         {error && (
           <Alert variant="destructive" className="mb-4">
@@ -495,7 +480,7 @@ export default function PublishingPage() {
             )}
           </section>
         </div>
-      </div>
-    </main>
+      </main>
+    </StudioShell>
   );
 }

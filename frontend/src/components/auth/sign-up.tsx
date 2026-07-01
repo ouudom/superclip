@@ -40,9 +40,9 @@ export function SignUp() {
   };
 
   return (
-    <Card className="w-full max-w-md mx-auto">
+    <Card className="mx-auto w-full max-w-md rounded-lg border-slate-200 bg-white shadow-sm">
       <CardHeader>
-        <CardTitle>Sign Up</CardTitle>
+        <CardTitle className="font-[var(--font-syne)] text-2xl">Sign up</CardTitle>
         <CardDescription>Create a new account to get started</CardDescription>
       </CardHeader>
       <CardContent>
@@ -72,8 +72,8 @@ export function SignUp() {
             disabled={loading}
             minLength={8}
           />
-          <Button type="submit" className="w-full" disabled={loading}>
-            {loading ? "Creating Account..." : "Sign Up"}
+          <Button type="submit" className="w-full bg-slate-950 hover:bg-slate-800" disabled={loading}>
+            {loading ? "Creating account..." : "Sign up"}
           </Button>
         </form>
         {message && (

@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import {
-  ArrowLeft,
   AudioLines,
   Clapperboard,
   Download,
@@ -17,11 +16,11 @@ import {
   Volume2,
   VolumeX,
 } from "lucide-react";
+import { StudioShell } from "@/components/studio-shell";
 import { useSession } from "@/lib/auth-client";
 import { formatSupportMessage, parseApiError } from "@/lib/api-error";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Slider } from "@/components/ui/slider";
@@ -562,8 +561,8 @@ export default function TaskEditPage() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-white p-4">
-        <div className="max-w-7xl mx-auto space-y-4">
+      <StudioShell title="Clip editor" subtitle="Load editor">
+        <div className="space-y-4">
           <Skeleton className="h-10 w-56" />
           <Skeleton className="h-[420px] w-full" />
           <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
@@ -571,34 +570,27 @@ export default function TaskEditPage() {
             <Skeleton className="h-[520px] xl:col-span-5" />
           </div>
         </div>
-      </div>
+      </StudioShell>
     );
   }
 
   return (
-    <div className="min-h-screen bg-white">
-      <div className="border-b bg-white">
-        <div className="max-w-7xl mx-auto px-4 py-5 flex items-center justify-between gap-4">
-          <div className="space-y-1">
-            <div className="flex items-center gap-3">
-              <Link href={`/tasks/${params.id}`}>
-                <Button variant="ghost" size="sm">
-                  <ArrowLeft className="w-4 h-4" />
-                  Back to Task
-                </Button>
-              </Link>
-              <Badge variant="outline">Studio Editor</Badge>
-            </div>
-            <h1 className="text-2xl font-bold text-black">{task?.source_title || "Clip Editor"}</h1>
-          </div>
-          <Button onClick={handleExport} disabled={!selectedClip || isSaving}>
+    <StudioShell
+      title={task?.source_title || "Clip editor"}
+      subtitle="Fine-tune cuts, captions, playback, and export."
+      actions={
+        <div className="flex items-center gap-2">
+          <Link href={`/tasks/${params.id}`}>
+            <Button variant="outline" className="bg-white">Back to task</Button>
+          </Link>
+          <Button onClick={handleExport} disabled={!selectedClip || isSaving} className="bg-slate-950 hover:bg-slate-800">
             <Download className="w-4 h-4" />
             {exportProgress !== null ? `Exporting ${exportProgress}%` : "Export Selected"}
           </Button>
         </div>
-      </div>
-
-      <div className="max-w-7xl mx-auto px-4 py-6 space-y-6">
+      }
+    >
+      <div className="space-y-6">
         {error && (
           <Alert>
             <AlertDescription>{error}</AlertDescription>
@@ -944,6 +936,6 @@ export default function TaskEditPage() {
           </>
         )}
       </div>
-    </div>
+    </StudioShell>
   );
 }

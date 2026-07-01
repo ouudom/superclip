@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { AlertCircle, Archive, ArrowLeft, Clock, Database, DollarSign, Pin, Search, Tags } from "lucide-react";
+import { AlertCircle, Archive, Clock, Database, DollarSign, Pin, Search, Tags } from "lucide-react";
+import { StudioShell } from "@/components/studio-shell";
 import { useSession } from "@/lib/auth-client";
 import { formatSupportMessage, parseApiError } from "@/lib/api-error";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -212,63 +213,37 @@ export default function LibraryPage() {
 
   if (isPending || isLoading) {
     return (
-      <div className="min-h-screen bg-stone-50 p-4">
-        <div className="mx-auto max-w-6xl space-y-4">
+      <StudioShell title="Clips" subtitle="Load library">
+        <div className="space-y-4">
           <Skeleton className="h-10 w-48" />
           <Skeleton className="h-24 w-full" />
           <Skeleton className="h-40 w-full" />
           <Skeleton className="h-40 w-full" />
         </div>
-      </div>
+      </StudioShell>
     );
   }
 
   if (!session?.user) {
     return (
-      <div className="min-h-screen bg-white p-4">
-        <div className="mx-auto max-w-4xl py-24 text-center">
-          <h1 className="mb-4 text-3xl font-bold text-black">Sign In Required</h1>
+      <StudioShell title="Clips" subtitle="Sign in to view your content library">
+        <div className="mx-auto max-w-lg rounded-lg border border-slate-200 bg-white p-8 text-center shadow-sm">
+          <h1 className="mb-4 font-[var(--font-syne)] text-2xl font-bold text-slate-950">Sign in required</h1>
           <Link href="/sign-in">
-            <Button>Sign In</Button>
+            <Button className="bg-slate-950 hover:bg-slate-800">Sign in</Button>
           </Link>
         </div>
-      </div>
+      </StudioShell>
     );
   }
 
   return (
-    <div className="min-h-screen bg-stone-50">
-      <div className="border-b border-stone-200 bg-white">
-        <div className="mx-auto max-w-6xl px-4 py-5">
-          <div className="mb-4 flex items-center gap-2">
-            <Link href="/">
-              <Button variant="ghost" size="sm">
-                <ArrowLeft className="h-4 w-4" />
-                Back
-              </Button>
-            </Link>
-            <Link href="/list">
-              <Button variant="outline" size="sm">Generations</Button>
-            </Link>
-            <Link href="/publishing">
-              <Button variant="outline" size="sm">Publishing</Button>
-            </Link>
-          </div>
-          <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-            <div>
-              <h1 className="text-2xl font-bold text-stone-950">Content Library</h1>
-              <p className="mt-1 text-sm text-stone-500">
-                Search old sources, tag clips, track storage, estimate AI spend.
-              </p>
-            </div>
-            <Button onClick={() => void loadLibrary()} variant="outline">
-              Refresh
-            </Button>
-          </div>
-        </div>
-      </div>
-
-      <main className="mx-auto max-w-6xl space-y-5 px-4 py-6">
+    <StudioShell
+      title="Clips"
+      subtitle="Search old sources, tag clips, track storage, estimate AI spend."
+      actions={<Button onClick={() => void loadLibrary()} variant="outline" className="bg-white">Refresh</Button>}
+    >
+      <main className="space-y-5">
         {error && (
           <Alert className="border-red-200 bg-red-50 text-red-900">
             <AlertCircle className="h-4 w-4" />
@@ -556,6 +531,6 @@ export default function LibraryPage() {
           </div>
         )}
       </main>
-    </div>
+    </StudioShell>
   );
 }

@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, KeyRound, Copy, Check, Trash2, AlertCircle, Plus } from "lucide-react";
+import { KeyRound, Copy, Check, Trash2, AlertCircle, Plus } from "lucide-react";
+import { StudioShell } from "@/components/studio-shell";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -107,41 +108,29 @@ export default function ApiKeysPage() {
 
   if (isPending) {
     return (
-      <div className="min-h-screen bg-white flex items-center justify-center p-4">
+      <StudioShell title="API Keys" subtitle="Load keys">
         <Skeleton className="h-32 w-full max-w-xl" />
-      </div>
+      </StudioShell>
     );
   }
 
   if (!session?.user) {
     return (
-      <div className="min-h-screen bg-white">
-        <div className="max-w-4xl mx-auto px-4 py-24 text-center">
-          <p className="text-gray-600 mb-4">Sign in to manage your API keys.</p>
+      <StudioShell title="API Keys" subtitle="Sign in to manage programmatic access">
+        <div className="mx-auto max-w-lg rounded-lg border border-slate-200 bg-white p-8 text-center shadow-sm">
+          <p className="mb-4 text-sm text-slate-600">Sign in to manage your API keys.</p>
           <Link href="/sign-in">
-            <Button>Sign In</Button>
+            <Button className="bg-slate-950 hover:bg-slate-800">Sign in</Button>
           </Link>
         </div>
-      </div>
+      </StudioShell>
     );
   }
 
   return (
-    <div className="min-h-screen bg-white">
-      {/* Header */}
-      <div className="border-b bg-white">
-        <div className="max-w-7xl mx-auto px-4 py-4">
-          <Link href="/settings">
-            <Button variant="ghost" size="sm">
-              <ArrowLeft className="w-4 h-4" />
-              Settings
-            </Button>
-          </Link>
-        </div>
-      </div>
-
+    <StudioShell title="API Keys" subtitle="Create keys for MCP and other programmatic access.">
       {/* Main Content */}
-      <div className="max-w-4xl mx-auto px-4 py-16">
+      <div className="mx-auto max-w-4xl">
         <div className="max-w-xl mx-auto">
           <div className="mb-8">
             <div className="flex items-center gap-2 mb-2">
@@ -249,6 +238,6 @@ export default function ApiKeysPage() {
           </div>
         </div>
       </div>
-    </div>
+    </StudioShell>
   );
 }
