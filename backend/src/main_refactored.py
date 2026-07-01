@@ -16,6 +16,7 @@ from fastapi import FastAPI, Depends, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
+from sqlalchemy.exc import TimeoutError as SQLAlchemyTimeoutError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .config import Config, get_config, set_config_override
@@ -115,6 +116,23 @@ def create_app(
 
         try:
             response = await call_next(request)
+        except SQLAlchemyTimeoutError:
+            elapsed_ms = round((time.perf_counter() - started_at) * 1000, 2)
+            logger.warning(
+                "Database connection pool exhausted while processing %s %s after %sms",
+                request.method,
+                request.url.path,
+                elapsed_ms,
+            )
+            clear_trace_id()
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "detail": "Database is busy. Please retry shortly.",
+                    "trace_id": trace_id,
+                },
+                headers={TRACE_HEADER: trace_id},
+            )
         except Exception:
             logger.exception("Unhandled exception while processing request")
             clear_trace_id()

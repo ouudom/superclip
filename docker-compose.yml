@@ -64,6 +64,9 @@ services:
       - PYTHONPATH=/app
       - PYTHONUNBUFFERED=1
       - DATABASE_URL=postgresql+asyncpg://supoclip:supoclip_password@postgres:5432/supoclip
+      - DATABASE_POOL_SIZE=${BACKEND_DATABASE_POOL_SIZE:-20}
+      - DATABASE_MAX_OVERFLOW=${BACKEND_DATABASE_MAX_OVERFLOW:-20}
+      - DATABASE_POOL_TIMEOUT_SECONDS=${DATABASE_POOL_TIMEOUT_SECONDS:-10}
       - TEMP_DIR=/app/uploads
       - WATCHED_SOURCE_DIR=/app/watched
       - PUBLISH_EXPORT_DIR=/app/exports
@@ -165,6 +168,9 @@ services:
       - PYTHONPATH=/app
       - PYTHONUNBUFFERED=1
       - DATABASE_URL=postgresql+asyncpg://supoclip:supoclip_password@postgres:5432/supoclip
+      - DATABASE_POOL_SIZE=${WORKER_DATABASE_POOL_SIZE:-5}
+      - DATABASE_MAX_OVERFLOW=${WORKER_DATABASE_MAX_OVERFLOW:-5}
+      - DATABASE_POOL_TIMEOUT_SECONDS=${DATABASE_POOL_TIMEOUT_SECONDS:-10}
       - TEMP_DIR=/app/uploads
       - WATCHED_SOURCE_DIR=/app/watched
       - PUBLISH_EXPORT_DIR=/app/exports

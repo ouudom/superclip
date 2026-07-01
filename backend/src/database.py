@@ -17,6 +17,9 @@ load_dotenv()
 DEFAULT_DATABASE_URL = os.getenv(
     "DATABASE_URL", "postgresql+asyncpg://localhost:5432/supoclip"
 )
+DEFAULT_DB_POOL_SIZE = 10
+DEFAULT_DB_MAX_OVERFLOW = 20
+DEFAULT_DB_POOL_TIMEOUT = 10
 
 _database_url_override: str | None = None
 _engine_override: AsyncEngine | None = None
@@ -30,12 +33,26 @@ class Base(DeclarativeBase):
     pass
 
 
+def _get_int_env(name: str, default: int, minimum: int = 0) -> int:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    try:
+        parsed = int(value)
+    except ValueError:
+        return default
+    return max(parsed, minimum)
+
+
 def _build_engine(database_url: str) -> AsyncEngine:
     return create_async_engine(
         database_url,
         echo=False,
-        pool_size=10,
-        max_overflow=20,
+        pool_size=_get_int_env("DATABASE_POOL_SIZE", DEFAULT_DB_POOL_SIZE, 1),
+        max_overflow=_get_int_env("DATABASE_MAX_OVERFLOW", DEFAULT_DB_MAX_OVERFLOW),
+        pool_timeout=_get_int_env(
+            "DATABASE_POOL_TIMEOUT_SECONDS", DEFAULT_DB_POOL_TIMEOUT, 1
+        ),
         pool_pre_ping=True,
         pool_recycle=3600,
     )
@@ -88,8 +105,9 @@ async def get_db():
     async with AsyncSessionLocal() as session:
         try:
             yield session
-        finally:
-            await session.close()
+        except Exception:
+            await session.rollback()
+            raise
 
 
 # Initialize database

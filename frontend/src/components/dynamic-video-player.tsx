@@ -7,6 +7,7 @@ interface DynamicVideoPlayerProps {
   muted?: boolean;
   loop?: boolean;
   className?: string;
+  height?: string;
 }
 
 const DynamicVideoPlayer: React.FC<DynamicVideoPlayerProps> = ({
@@ -16,13 +17,14 @@ const DynamicVideoPlayer: React.FC<DynamicVideoPlayerProps> = ({
   muted = false,
   loop = false,
   className = "",
+  height = "min(70vh, 600px)",
 }) => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
   return (
     <div
       className={`relative rounded-lg overflow-hidden ${className}`}
-      style={{ height: "min(70vh, 600px)", aspectRatio: "9 / 16" }}
+      style={{ height, aspectRatio: "9 / 16" }}
     >
       <video
         ref={videoRef}
