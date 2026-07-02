@@ -23,7 +23,7 @@ jobs:
         with:
           host: 100.82.68.62   # your tailscale IP
           username: homeserver
-          key: ${{ secrets.SSH_KEY }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
           script: |
             cd /var/www/superclip
             git pull origin main
