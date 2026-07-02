@@ -27,7 +27,7 @@ describe("SignUp", () => {
     await user.type(screen.getByPlaceholderText("Full Name"), "Jane Admin");
     await user.type(screen.getByPlaceholderText("Email"), "admin@example.com");
     await user.type(screen.getByPlaceholderText("Password"), "Password123!");
-    await user.click(screen.getByRole("button", { name: "Sign Up" }));
+    await user.click(screen.getByRole("button", { name: /sign up/i }));
 
     expect(await screen.findByText("Account already exists")).toBeInTheDocument();
   });
@@ -41,7 +41,7 @@ describe("SignUp", () => {
     await user.type(screen.getByPlaceholderText("Full Name"), "Jane Admin");
     await user.type(screen.getByPlaceholderText("Email"), "admin@example.com");
     await user.type(screen.getByPlaceholderText("Password"), "Password123!");
-    await user.click(screen.getByRole("button", { name: "Sign Up" }));
+    await user.click(screen.getByRole("button", { name: /sign up/i }));
 
     expect(
       await screen.findByText("Account created successfully! Signing you in..."),

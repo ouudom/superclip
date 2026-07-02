@@ -49,6 +49,14 @@ CREATE INDEX IF NOT EXISTS "task_artifacts_task_id_idx" ON "task_artifacts"("tas
 CREATE INDEX IF NOT EXISTS "task_artifacts_artifact_type_idx" ON "task_artifacts"("artifact_type");
 CREATE INDEX IF NOT EXISTS "task_artifacts_file_path_idx" ON "task_artifacts"("file_path");
 
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = CURRENT_TIMESTAMP;
+    RETURN NEW;
+END;
+$$ language 'plpgsql';
+
 DROP TRIGGER IF EXISTS update_task_artifacts_updated_at ON "task_artifacts";
 CREATE TRIGGER update_task_artifacts_updated_at
 BEFORE UPDATE ON "task_artifacts"

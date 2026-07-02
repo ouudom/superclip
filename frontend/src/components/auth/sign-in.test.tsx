@@ -33,7 +33,7 @@ describe("SignIn", () => {
 
     await user.type(screen.getByPlaceholderText("Email"), "user@example.com");
     await user.type(screen.getByPlaceholderText("Password"), "Password123!");
-    await user.click(screen.getByRole("button", { name: "Sign In" }));
+    await user.click(screen.getByRole("button", { name: /sign in/i }));
 
     expect(await screen.findByText("Invalid credentials")).toBeInTheDocument();
   });
@@ -46,7 +46,7 @@ describe("SignIn", () => {
 
     await user.type(screen.getByPlaceholderText("Email"), "user@example.com");
     await user.type(screen.getByPlaceholderText("Password"), "Password123!");
-    await user.click(screen.getByRole("button", { name: "Sign In" }));
+    await user.click(screen.getByRole("button", { name: /sign in/i }));
 
     expect(await screen.findByText("Signed in successfully!")).toBeInTheDocument();
   });

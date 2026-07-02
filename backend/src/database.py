@@ -119,6 +119,19 @@ async def init_db():
         await conn.execute(
             text(
                 """
+                CREATE OR REPLACE FUNCTION update_updated_at_column()
+                RETURNS TRIGGER AS $$
+                BEGIN
+                    NEW.updated_at = CURRENT_TIMESTAMP;
+                    RETURN NEW;
+                END;
+                $$ language 'plpgsql'
+                """
+            )
+        )
+        await conn.execute(
+            text(
+                """
                 CREATE TABLE IF NOT EXISTS schema_migrations (
                     version VARCHAR(255) PRIMARY KEY,
                     applied_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
