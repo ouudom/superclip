@@ -112,12 +112,12 @@ CAPTION_TEMPLATES: Dict[str, Dict[str, Any]] = {
         "position_y": 0.82,
     },
     "tiktok": {
-        "name": "TikTok",
-        "description": "TikTok-style with pink pop highlights",
+        "name": "Pop Highlight",
+        "description": "Short-form style with pink pop highlights",
         "font_family": "TikTokSans-Regular",
         "font_size": 34,
         "font_color": "#FFFFFF",
-        "highlight_color": "#FE2C55",  # TikTok pink
+        "highlight_color": "#FE2C55",  # vivid pink
         "emphasis_color": "#FE2C55",
         "stroke_color": "#000000",
         "stroke_width": 3,

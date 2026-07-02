@@ -51,6 +51,12 @@ interface PublishDraft {
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 const PLATFORMS = ["all", "tiktok", "reels", "shorts"];
 const STATUSES = ["all", "draft", "ready", "posted", "archived"];
+const PLATFORM_LABELS: Record<string, string> = {
+  all: "All platforms",
+  tiktok: "Short video",
+  reels: "Reels",
+  shorts: "Shorts",
+};
 const CHECKLIST_LABELS: Record<string, string> = {
   caption_copied: "Caption copied",
   video_exported: "Video exported",
@@ -83,6 +89,10 @@ function draftFromItem(item: PublishItem): PublishDraft {
 
 function itemKey(item: PublishItem) {
   return `${item.clip_id}:${item.platform}`;
+}
+
+function platformLabel(platform: string) {
+  return PLATFORM_LABELS[platform] || platform;
 }
 
 export default function PublishingPage() {
@@ -285,7 +295,7 @@ export default function PublishingPage() {
           <Select value={platform} onValueChange={setPlatform}>
             <SelectTrigger><SelectValue /></SelectTrigger>
             <SelectContent>
-              {PLATFORMS.map((value) => <SelectItem key={value} value={value}>{value}</SelectItem>)}
+              {PLATFORMS.map((value) => <SelectItem key={value} value={value}>{platformLabel(value)}</SelectItem>)}
             </SelectContent>
           </Select>
           <Select value={status} onValueChange={setStatus}>
@@ -326,7 +336,7 @@ export default function PublishingPage() {
                         <p className="text-xs text-stone-500">Clip {item.clip_order} · {Math.round(item.duration)}s</p>
                       </div>
                       <div className="flex shrink-0 gap-1">
-                        <Badge variant="outline">{item.platform}</Badge>
+                        <Badge variant="outline">{platformLabel(item.platform)}</Badge>
                         <Badge>{item.post_status}</Badge>
                       </div>
                     </div>

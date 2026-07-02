@@ -81,6 +81,21 @@ const EMPTY_DRAFT: WorkflowDraft = {
   font_color: "#FFFFFF",
 };
 
+const PLATFORM_LABELS: Record<string, string> = {
+  shorts: "Shorts",
+  reels: "Reels",
+  tiktok: "Short video",
+  multi: "Multi",
+};
+
+function platformLabel(platform: string) {
+  return PLATFORM_LABELS[platform] || platform;
+}
+
+function displayPresetText(value: string) {
+  return value.replaceAll("TikTok", "Short Video");
+}
+
 async function buildSupportError(response: Response, fallbackMessage: string) {
   const parsed = await parseApiError(response, fallbackMessage);
   return formatSupportMessage(parsed);
@@ -98,8 +113,8 @@ function draftFromWorkflow(workflow: Workflow): WorkflowDraft {
     : ["shorts", "reels", "tiktok"];
 
   return {
-    name: workflow.name,
-    description: workflow.description || "",
+    name: displayPresetText(workflow.name),
+    description: workflow.description ? displayPresetText(workflow.description) : "",
     source_type: workflow.source_type || "youtube",
     output_target: workflow.output_target || "shorts",
     is_default: workflow.is_default,
@@ -209,7 +224,7 @@ export default function WorkflowsPage() {
     setSelectedId(null);
     setDraft({
       ...draftFromWorkflow(source),
-      name: `${source.name} Copy`,
+      name: `${displayPresetText(source.name)} Copy`,
       is_default: false,
     });
   };
@@ -376,11 +391,11 @@ export default function WorkflowsPage() {
             >
               <div className="mb-2 flex flex-wrap items-center gap-2">
                 {workflow.is_default && <Badge>Default</Badge>}
-                <Badge variant="outline">{workflow.output_target}</Badge>
+                <Badge variant="outline">{platformLabel(workflow.output_target)}</Badge>
               </div>
-              <p className="font-semibold text-stone-950">{workflow.name}</p>
+              <p className="font-semibold text-stone-950">{displayPresetText(workflow.name)}</p>
               <p className="mt-1 text-sm text-stone-500">
-                {workflow.description || "No description"}
+                {workflow.description ? displayPresetText(workflow.description) : "No description"}
               </p>
             </button>
           ))}
@@ -429,7 +444,7 @@ export default function WorkflowsPage() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="shorts">Shorts</SelectItem>
-                      <SelectItem value="tiktok">TikTok</SelectItem>
+                      <SelectItem value="tiktok">Short video</SelectItem>
                       <SelectItem value="reels">Reels</SelectItem>
                       <SelectItem value="multi">Multi</SelectItem>
                     </SelectContent>
@@ -498,12 +513,12 @@ export default function WorkflowsPage() {
                   </div>
                   <div className="grid gap-3 sm:grid-cols-3">
                     {["shorts", "reels", "tiktok"].map((platform) => (
-                      <label key={platform} className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold capitalize text-slate-700">
+                      <label key={platform} className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700">
                         <Checkbox
                           checked={draft.platforms.includes(platform)}
                           onCheckedChange={(checked) => togglePlatform(platform, Boolean(checked))}
                         />
-                        {platform}
+                        {platformLabel(platform)}
                       </label>
                     ))}
                   </div>

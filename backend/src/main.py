@@ -730,9 +730,9 @@ async def get_available_fonts():
             font_files.append(
                 {
                     "name": font_name,
-                    "display_name": font_name.replace("-", " ")
-                    .replace("_", " ")
-                    .title(),
+                    "display_name": "Default Sans"
+                    if font_name == "TikTokSans-Regular"
+                    else font_name.replace("-", " ").replace("_", " ").title(),
                     "file_path": str(font_file),
                 }
             )

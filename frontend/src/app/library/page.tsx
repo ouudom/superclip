@@ -62,6 +62,12 @@ interface MetadataDraft {
 const STATUS_OPTIONS = ["all", "completed", "analysis_ready", "processing", "queued", "error", "cancelled"];
 const LIBRARY_STATUS_OPTIONS = ["draft", "review", "ready", "posted", "keep"];
 const PLATFORM_OPTIONS = ["", "tiktok", "reels", "shorts", "multi"];
+const PLATFORM_LABELS: Record<string, string> = {
+  tiktok: "Short video",
+  reels: "Reels",
+  shorts: "Shorts",
+  multi: "Multi",
+};
 
 async function buildSupportError(response: Response, fallbackMessage: string) {
   const parsed = await parseApiError(response, fallbackMessage);
@@ -91,6 +97,10 @@ function draftFromItem(item: LibraryItem): MetadataDraft {
     library_status: item.library_status || "draft",
     notes: item.notes || "",
   };
+}
+
+function platformLabel(platform: string) {
+  return PLATFORM_LABELS[platform] || platform;
 }
 
 export default function LibraryPage() {
@@ -347,7 +357,7 @@ export default function LibraryPage() {
                   <SelectItem value="__all">All platforms</SelectItem>
                   {PLATFORM_OPTIONS.filter(Boolean).map((option) => (
                     <SelectItem key={option} value={option}>
-                      {option}
+                      {platformLabel(option)}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -470,7 +480,7 @@ export default function LibraryPage() {
                                 <SelectItem value="__none">No platform</SelectItem>
                                 {PLATFORM_OPTIONS.filter(Boolean).map((option) => (
                                   <SelectItem key={option} value={option}>
-                                    {option}
+                                    {platformLabel(option)}
                                   </SelectItem>
                                 ))}
                               </SelectContent>

@@ -11,7 +11,7 @@ export default function SignInPage() {
             <Clapperboard className="h-7 w-7" />
           </div>
           <h1 className="mt-4 font-[var(--font-syne)] text-3xl font-bold text-slate-950">SupoClip</h1>
-          <p className="mt-2 text-sm text-cyan-700">TikTok repurposing studio</p>
+          <p className="mt-2 text-sm text-cyan-700">Video repurposing studio</p>
         </div>
         <SignIn />
         <div className="text-center">

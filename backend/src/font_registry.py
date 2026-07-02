@@ -11,6 +11,8 @@ TTF_NAME_ID_FULL_NAME = 4
 
 
 def _display_name(font_stem: str) -> str:
+    if font_stem == "TikTokSans-Regular":
+        return "Default Sans"
     return font_stem.replace("-", " ").replace("_", " ").strip().title()
 
 

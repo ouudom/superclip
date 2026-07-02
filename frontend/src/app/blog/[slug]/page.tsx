@@ -202,7 +202,7 @@ export default async function BlogPostPage({ params }: BlogPostPageProps) {
               <p className="mt-6 max-w-2xl text-lg leading-8 text-muted-foreground">
                 If you like the idea of OpusClip but want a free, open-source path, SupoClip gives
                 you the core workflow: find strong moments in long videos, reframe them vertically,
-                add captions, and export clips for Shorts, Reels, and TikTok.
+                add captions, and export clips for Shorts, Reels, and other social feeds.
               </p>
               <div className="mt-8 flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
                 <span>{post.author}</span>
@@ -339,7 +339,7 @@ export default async function BlogPostPage({ params }: BlogPostPageProps) {
                 <li>SupoClip transcribes the source and finds candidate moments.</li>
                 <li>AI scores clips for hook strength, engagement, value, and shareability.</li>
                 <li>The editor creates vertical, captioned clips with face-aware framing.</li>
-                <li>You export shorts for YouTube Shorts, TikTok, Instagram Reels, or other feeds.</li>
+                <li>You export shorts for YouTube Shorts, Instagram Reels, or other social feeds.</li>
               </ol>
 
               <h2>When SupoClip Is the Better Choice</h2>

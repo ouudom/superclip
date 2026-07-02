@@ -831,7 +831,7 @@ export default function TaskEditPage() {
                           <SelectValue placeholder="Preset" />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="tiktok">TikTok</SelectItem>
+                          <SelectItem value="tiktok">Short video</SelectItem>
                           <SelectItem value="reels">Reels</SelectItem>
                           <SelectItem value="shorts">Shorts</SelectItem>
                         </SelectContent>

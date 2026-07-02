@@ -204,7 +204,7 @@ export default function SettingsPage() {
                       </SelectItem>
                     ))}
                     {availableFonts.length === 0 && (
-                      <SelectItem value="TikTokSans-Regular">TikTok Sans Regular</SelectItem>
+                      <SelectItem value="TikTokSans-Regular">Default Sans</SelectItem>
                     )}
                   </SelectContent>
                 </Select>

@@ -79,6 +79,10 @@ type UploadAuthorization = DirectUploadAuthorization | ProxyUploadAuthorization;
 
 const MAX_VIDEO_UPLOAD_BYTES = 1_000_000_000;
 
+function displayPresetName(name: string) {
+  return name.replaceAll("TikTok", "Short Video");
+}
+
 const extractYouTubeVideoId = (value: string): string | null => {
   const input = value.trim();
   if (!input) return null;
@@ -194,7 +198,7 @@ function LandingOnly() {
           SupoClip
         </h1>
         <p className="mt-4 max-w-2xl text-lg leading-8 text-slate-600">
-          Turn long videos into TikTok-ready clips with captions, clean cuts, and simple downloads.
+          Turn long videos into social-ready clips with captions, clean cuts, and simple downloads.
         </p>
         <div className="mt-8 flex gap-3">
           <Link href="/sign-in">
@@ -490,7 +494,7 @@ function HomeContent() {
 
   if (!session?.user) {
     return (
-      <StudioShell title="Create clips" subtitle="Sign in to generate TikTok clips">
+      <StudioShell title="Create clips" subtitle="Sign in to generate social clips">
         <div className="mx-auto max-w-lg rounded-lg border border-slate-200 bg-white p-8 text-center shadow-sm">
           <Sparkles className="mx-auto h-10 w-10 text-cyan-600" />
           <h2 className="mt-4 font-[var(--font-syne)] text-2xl font-bold text-slate-950">Studio locked</h2>
@@ -508,7 +512,7 @@ function HomeContent() {
   return (
     <StudioShell
       title="Create clips"
-      subtitle="Paste a link or upload a video. SupoClip finds TikTok-ready moments."
+      subtitle="Paste a link or upload a video. SupoClip finds social-ready moments."
       actions={
         <Link href="/list">
           <Button variant="outline" className="hidden bg-white sm:inline-flex">
@@ -526,7 +530,7 @@ function HomeContent() {
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
                     <h2 className="font-[var(--font-syne)] text-2xl font-bold text-slate-950">
-                      New TikTok source
+                      New clip source
                     </h2>
                     <p className="mt-1 text-sm text-slate-500">Both YouTube links and uploads use same generation path.</p>
                   </div>
@@ -669,7 +673,7 @@ function HomeContent() {
                     <SelectItem value="none">Default fast clips</SelectItem>
                     {presets.map((preset) => (
                       <SelectItem key={preset.id} value={preset.id}>
-                        {preset.name}
+                        {displayPresetName(preset.name)}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -734,7 +738,7 @@ function HomeContent() {
                           {font.display_name}
                         </SelectItem>
                       ))}
-                      {availableFonts.length === 0 && <SelectItem value="TikTokSans-Regular">TikTok Sans</SelectItem>}
+                      {availableFonts.length === 0 && <SelectItem value="TikTokSans-Regular">Default Sans</SelectItem>}
                     </SelectContent>
                   </Select>
                 </div>

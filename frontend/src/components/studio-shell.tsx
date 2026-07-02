@@ -57,7 +57,7 @@ function StudioSidebar({ onNavigate }: { onNavigate?: () => void }) {
           <span className="block font-[var(--font-syne)] text-lg font-bold leading-5 text-slate-950">
             SupoClip
           </span>
-          <span className="block text-xs font-medium text-cyan-700">TikTok studio</span>
+          <span className="block text-xs font-medium text-cyan-700">Clip studio</span>
         </span>
       </Link>
 
