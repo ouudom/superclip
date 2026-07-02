@@ -2,6 +2,7 @@
 Task artifact repository for durable per-task pipeline resume data.
 """
 
+from inspect import isawaitable
 from typing import Any, Dict, Optional
 from uuid import uuid4
 import json
@@ -66,8 +67,12 @@ class TaskArtifactRepository:
             {"task_id": task_id},
         )
 
+        rows = result.fetchall()
+        if isawaitable(rows):
+            rows = await rows
+
         artifacts: Dict[str, Dict[str, Any]] = {}
-        for row in result.fetchall():
+        for row in rows:
             artifacts[row.artifact_type] = {
                 "text_value": row.text_value,
                 "json_value": row.json_value,
