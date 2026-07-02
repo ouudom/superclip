@@ -28,6 +28,7 @@ services:
       - DATABASE_URL=postgresql://supoclip:supoclip_password@postgres:5432/supoclip
       - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET:-supoclip_dev_secret_change_in_production}
       - BETTER_AUTH_URL=${BETTER_AUTH_URL:-http://localhost:3107}
+      - BETTER_AUTH_TRUSTED_ORIGINS=${BETTER_AUTH_TRUSTED_ORIGINS:-}
       - ALLOW_PUBLIC_SIGNUP=${ALLOW_PUBLIC_SIGNUP:-false}
       - DISABLE_SIGN_UP=${DISABLE_SIGN_UP:-false}
     depends_on:

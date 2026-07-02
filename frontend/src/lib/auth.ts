@@ -17,11 +17,19 @@ function toOrigin(value?: string) {
   }
 }
 
+function toOrigins(value?: string) {
+  return (value ?? "")
+    .split(",")
+    .map((origin) => toOrigin(origin.trim()))
+    .filter((origin): origin is string => Boolean(origin));
+}
+
 const trustedOrigins = Array.from(
   new Set(
     [
       toOrigin(process.env.NEXT_PUBLIC_APP_URL),
       toOrigin(process.env.BETTER_AUTH_URL),
+      ...toOrigins(process.env.BETTER_AUTH_TRUSTED_ORIGINS),
       "http://localhost:3107",
       "http://sp.localhost:3107",
       "http://supoclip.localhost:3107",
