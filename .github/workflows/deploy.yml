@@ -1,26 +1,30 @@
-name: Deploy to Home Server
+name: Deploy to Server
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
 
     steps:
+      # 1. Install Tailscale in GitHub runner
+      - name: Install Tailscale
+        run: curl -fsSL https://tailscale.com/install.sh | sh
+
+      # 2. Connect runner to your Tailscale network
+      - name: Connect to Tailscale
+        run: sudo tailscale up --authkey ${{ secrets.TS_AUTHKEY }}
+
+      # 3. Deploy via SSH inside private network
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.2.2
         with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SERVER_USER }}
-          key: ${{ secrets.SERVER_SSH_KEY }}
+          host: 100.82.68.62   # your tailscale IP
+          username: homeserver
+          key: ${{ secrets.SSH_KEY }}
           script: |
             cd /var/www/superclip
-
             git pull origin main
-
             docker compose up -d --build
-
-            docker image prune -f
